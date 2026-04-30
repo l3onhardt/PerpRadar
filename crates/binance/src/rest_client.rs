@@ -24,8 +24,7 @@ impl RestClient {
 
     pub async fn exchange_info_json(&self) -> anyhow::Result<serde_json::Value> {
         let url = self.exchange_info_url();
-        Ok(self
-            .client
+        self.client
             .get(url.clone())
             .send()
             .await
@@ -34,6 +33,6 @@ impl RestClient {
             .with_context(|| format!("exchangeInfo request returned error status from {url}"))?
             .json()
             .await
-            .with_context(|| format!("decode exchangeInfo JSON from {url}"))?)
+            .with_context(|| format!("decode exchangeInfo JSON from {url}"))
     }
 }
