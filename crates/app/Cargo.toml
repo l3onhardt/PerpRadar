@@ -1,0 +1,23 @@
+[package]
+name = "perp-radar"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "perp-radar"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+config.workspace = true
+perp-radar-api = { path = "../api" }
+perp-radar-binance = { path = "../binance" }
+perp-radar-core = { path = "../core" }
+perp-radar-features = { path = "../features" }
+perp-radar-state = { path = "../state" }
+perp-radar-storage = { path = "../storage" }
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

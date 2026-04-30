@@ -1,0 +1,10 @@
+[package]
+name = "perp-radar-features"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+perp-radar-core = { path = "../core" }
+perp-radar-state = { path = "../state" }
+serde.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "perp-radar-storage"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clickhouse.workspace = true
+perp-radar-core = { path = "../core" }
+serde.workspace = true
+tokio.workspace = true
