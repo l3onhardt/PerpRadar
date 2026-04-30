@@ -53,6 +53,9 @@ pub fn parse_combined_event(payload: &str) -> anyhow::Result<BinanceEvent> {
         _ if is_partial_depth_stream(&combined.stream) => {
             parse_partial_depth(combined.stream, combined.data)
         }
+        _ if is_empty_symbol_partial_depth_stream(&combined.stream) => {
+            parse_partial_depth(combined.stream, combined.data)
+        }
         _ => Ok(BinanceEvent::Ignored),
     }
 }
@@ -239,14 +242,20 @@ fn validate_stream_symbol(stream: &str, symbol: &str) -> anyhow::Result<()> {
 }
 
 fn stream_symbol(stream: &str) -> Option<&str> {
-    stream.split_once('@').map(|(symbol, _)| symbol)
+    stream
+        .split_once('@')
+        .and_then(|(symbol, _)| (!symbol.is_empty()).then_some(symbol))
 }
 
 fn is_partial_depth_stream(stream: &str) -> bool {
     stream
         .split_once('@')
-        .map(|(_, name)| name.starts_with("depth20@"))
+        .map(|(symbol, name)| !symbol.is_empty() && name == "depth20@500ms")
         .unwrap_or(false)
+}
+
+fn is_empty_symbol_partial_depth_stream(stream: &str) -> bool {
+    stream == "@depth20@500ms"
 }
 
 impl From<DepthEvent> for BookDelta {

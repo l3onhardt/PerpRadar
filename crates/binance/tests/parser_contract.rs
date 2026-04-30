@@ -95,6 +95,57 @@ fn parses_partial_depth_event() {
 }
 
 #[test]
+fn parses_exact_depth20_500ms_partial_depth_stream() {
+    let payload = r#"{
+      "stream":"btcusdt@depth20@500ms",
+      "data":{
+        "lastUpdateId":110,
+        "E":1714521600000,
+        "T":1714521600000,
+        "bids":[["64000.0","1.2"]],
+        "asks":[["64001.0","0.8"]]
+      }
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    assert!(matches!(event, BinanceEvent::PartialDepth(_)));
+}
+
+#[test]
+fn ignores_malformed_partial_depth_interval() {
+    let payload = r#"{
+      "stream":"btcusdt@depth20@bad",
+      "data":{
+        "lastUpdateId":110,
+        "E":1714521600000,
+        "T":1714521600000,
+        "bids":[["64000.0","1.2"]],
+        "asks":[["64001.0","0.8"]]
+      }
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    assert!(matches!(event, BinanceEvent::Ignored));
+}
+
+#[test]
+fn rejects_partial_depth_stream_with_empty_symbol() {
+    let payload = r#"{
+      "stream":"@depth20@500ms",
+      "data":{
+        "lastUpdateId":110,
+        "E":1714521600000,
+        "T":1714521600000,
+        "bids":[["64000.0","1.2"]],
+        "asks":[["64001.0","0.8"]]
+      }
+    }"#;
+
+    let err = parse_combined_event(payload).unwrap_err();
+    assert!(err.to_string().contains("missing symbol"));
+}
+
+#[test]
 fn rejects_kline_non_finite_and_negative_numbers() {
     for (field, value) in [
         ("o", "NaN"),
