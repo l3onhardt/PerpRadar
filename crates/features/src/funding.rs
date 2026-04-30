@@ -1,5 +1,5 @@
 pub fn z_score(history: &[f64], current: f64) -> Option<f64> {
-    if history.len() < 2 {
+    if history.len() < 2 || !current.is_finite() || history.iter().any(|value| !value.is_finite()) {
         return None;
     }
 
@@ -14,7 +14,7 @@ pub fn z_score(history: &[f64], current: f64) -> Option<f64> {
         / (history.len() as f64 - 1.0);
     let stddev = variance.sqrt();
 
-    if stddev == 0.0 {
+    if !stddev.is_finite() || stddev <= 0.0 {
         return None;
     }
 

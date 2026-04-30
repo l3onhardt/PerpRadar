@@ -12,6 +12,7 @@ pub struct RankedCandidate {
 }
 
 pub fn rank_candidates(mut candidates: Vec<Candidate>) -> Vec<RankedCandidate> {
+    candidates.retain(|candidate| candidate.score.is_finite());
     candidates.sort_by(|a, b| {
         b.score
             .total_cmp(&a.score)

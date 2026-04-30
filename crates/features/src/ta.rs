@@ -1,12 +1,12 @@
 pub fn return_pct(start: f64, end: f64) -> Option<f64> {
-    if start == 0.0 {
+    if !start.is_finite() || !end.is_finite() || start == 0.0 {
         return None;
     }
     Some((end - start) / start)
 }
 
 pub fn simple_rsi(closes: &[f64], period: usize) -> Option<f64> {
-    if closes.len() < period + 1 || period == 0 {
+    if closes.len() < period + 1 || period == 0 || closes.iter().any(|close| !close.is_finite()) {
         return None;
     }
 
@@ -21,6 +21,10 @@ pub fn simple_rsi(closes: &[f64], period: usize) -> Option<f64> {
         } else {
             losses += change.abs();
         }
+    }
+
+    if gains == 0.0 && losses == 0.0 {
+        return Some(50.0);
     }
 
     if losses == 0.0 {
