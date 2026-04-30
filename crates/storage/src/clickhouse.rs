@@ -19,7 +19,7 @@ pub async fn assert_clickhouse_ready(client: &Client) -> Result<()> {
         .context("ClickHouse readiness check failed")
 }
 
-pub async fn run_migrations(url: &str, database: &str) -> Result<()> {
+pub async fn run_migrations(url: &str, database: &str) -> Result<Client> {
     let admin = admin_client(url);
     admin
         .query("CREATE DATABASE IF NOT EXISTS ?")
@@ -39,5 +39,5 @@ pub async fn run_migrations(url: &str, database: &str) -> Result<()> {
             .with_context(|| format!("running ClickHouse migration {name}"))?;
     }
 
-    Ok(())
+    Ok(client)
 }
