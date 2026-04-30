@@ -9,7 +9,9 @@ pub async fn stream_text_messages(url: Url, tx: mpsc::Sender<String>) -> anyhow:
 
     while let Some(message) = read.next().await {
         if let Message::Text(text) = message? {
-            tx.send(text.to_string()).await?;
+            if tx.send(text.to_string()).await.is_err() {
+                return Ok(());
+            }
         }
     }
 
