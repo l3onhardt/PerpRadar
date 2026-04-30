@@ -18,7 +18,7 @@ fn rsi_is_high_for_monotonic_up_series() {
 fn funding_z_score_uses_sample_mean_and_stddev() {
     let history = vec![0.0001, 0.0002, 0.0003, 0.0004];
     let z = z_score(&history, 0.0005).unwrap();
-    assert!(z > 1.0);
+    assert!((z - 1.9364916731037085).abs() < 0.0000000001);
 }
 
 #[test]
