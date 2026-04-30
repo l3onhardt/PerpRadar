@@ -1255,6 +1255,7 @@ dependencies = [
 name = "perp-radar-features"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "perp-radar-core",
  "perp-radar-state",
  "serde",

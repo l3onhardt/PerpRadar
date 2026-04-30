@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 perp-radar-core = { path = "../core" }
 perp-radar-state = { path = "../state" }
 serde.workspace = true
