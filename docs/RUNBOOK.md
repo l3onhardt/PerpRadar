@@ -10,7 +10,7 @@ Default local startup:
 cargo run -p perp-radar
 ```
 
-Before the runtime HTTP server is wired, this command performs the startup checks, logs readiness, and exits. The API checks below apply when the runtime HTTP server is running.
+After ClickHouse verification succeeds, this command serves the HTTP API on the configured bind address.
 
 ## Health Check
 
@@ -18,7 +18,7 @@ Before the runtime HTTP server is wired, this command performs the startup check
 curl http://127.0.0.1:8080/v1/health
 ```
 
-Use this when the runtime HTTP server is running to confirm the API process is accepting requests.
+Use this to confirm the API process is accepting requests.
 
 ## Top Packet Text
 
@@ -28,4 +28,4 @@ Fetch the top ranked packet in text form:
 curl "http://127.0.0.1:8080/v1/export/top.txt?limit=1"
 ```
 
-Use this endpoint for a quick LLM-ready smoke check when the runtime HTTP server is running. The response should include the leading market packet summary and quality context.
+Use this endpoint for a quick LLM-ready smoke check. The response should include the leading market packet summary and quality context.

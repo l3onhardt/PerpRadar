@@ -9,13 +9,14 @@ fn operations_docs_name_required_clickhouse_dependency() {
 }
 
 #[test]
-fn operations_docs_qualify_api_curl_guidance() {
+fn operations_docs_describe_serving_api_after_startup() {
     let docs = std::fs::read_to_string(format!(
         "{}/../../docs/OPERATIONS.md",
         env!("CARGO_MANIFEST_DIR")
     ))
     .unwrap();
-    assert!(docs.contains("when the runtime HTTP server is running"));
+    assert!(docs.contains("serves the API"));
+    assert!(docs.contains("confirm the HTTP runtime is serving requests"));
 }
 
 #[test]
@@ -30,11 +31,11 @@ fn data_contract_docs_name_packet_schema() {
 }
 
 #[test]
-fn runbook_docs_qualify_api_curl_guidance() {
+fn runbook_docs_describe_cargo_run_serving_api() {
     let docs = std::fs::read_to_string(format!(
         "{}/../../docs/RUNBOOK.md",
         env!("CARGO_MANIFEST_DIR")
     ))
     .unwrap();
-    assert!(docs.contains("when the runtime HTTP server is running"));
+    assert!(docs.contains("serves the HTTP API"));
 }
