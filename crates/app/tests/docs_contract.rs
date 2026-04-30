@@ -39,3 +39,15 @@ fn runbook_docs_describe_cargo_run_serving_api() {
     .unwrap();
     assert!(docs.contains("serves the HTTP API"));
 }
+
+#[test]
+fn runbook_docs_explain_empty_export_before_ingestion() {
+    let docs = std::fs::read_to_string(format!(
+        "{}/../../docs/RUNBOOK.md",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    assert!(docs.contains("empty output"));
+    assert!(docs.contains("ingested"));
+    assert!(docs.contains("cache"));
+}

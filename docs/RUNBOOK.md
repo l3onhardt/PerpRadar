@@ -29,3 +29,5 @@ curl "http://127.0.0.1:8080/v1/export/top.txt?limit=1"
 ```
 
 Use this endpoint for a quick LLM-ready smoke check. The response should include the leading market packet summary and quality context.
+
+With the minimal runtime, empty output is expected until packets have been ingested and stored in the in-memory cache.

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use perp_radar_api::{cache::PacketCache, routes};
 use perp_radar_binance::streams::{combined_stream_url, WsBase};
 use tokio::net::TcpListener;
@@ -50,9 +50,25 @@ pub fn build_ws_urls(config: &AppConfig) -> Result<Vec<Url>> {
 }
 
 pub async fn serve_api(config: &AppConfig, cache: PacketCache) -> Result<()> {
-    let address = config.api.bind.parse::<SocketAddr>()?;
-    let listener = TcpListener::bind(address).await?;
+    let address = config
+        .api
+        .bind
+        .parse::<SocketAddr>()
+        .with_context(|| format!("parsing api.bind address {}", config.api.bind))?;
+    let listener = TcpListener::bind(address)
+        .await
+        .with_context(|| format!("binding API listener at {address}"))?;
 
-    axum::serve(listener, routes::router(cache)).await?;
+    serve_api_listener(listener, cache).await
+}
+
+pub async fn serve_api_listener(listener: TcpListener, cache: PacketCache) -> Result<()> {
+    let address = listener
+        .local_addr()
+        .context("reading API listener local address")?;
+
+    axum::serve(listener, routes::router(cache))
+        .await
+        .with_context(|| format!("serving API at {address}"))?;
     Ok(())
 }
