@@ -27,7 +27,7 @@ pub fn build_standard_packet(
         ..PriceBlock::default()
     };
 
-    if price.ret_5m.is_none() {
+    if candles.len() <= 5 {
         quality.add_reason(QualityReason::InsufficientKlineHistory);
     }
 
