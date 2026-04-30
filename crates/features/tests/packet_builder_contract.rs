@@ -23,6 +23,14 @@ fn closed_candle(symbol: &str, open_time_ms: i64, close: f64) -> Candle {
     }
 }
 
+fn closed_colored_candle(symbol: &str, open_time_ms: i64, open: f64, close: f64) -> Candle {
+    let mut candle = closed_candle(symbol, open_time_ms, close);
+    candle.open = open;
+    candle.high = open.max(close);
+    candle.low = open.min(close);
+    candle
+}
+
 #[test]
 fn standard_packet_uses_symbol_price_and_quality_from_state() {
     let mut state = SymbolState::new("BTCUSDT", 100);
@@ -47,4 +55,42 @@ fn standard_packet_uses_symbol_price_and_quality_from_state() {
         .quality
         .reasons
         .contains(&QualityReason::InsufficientKlineHistory));
+}
+
+#[test]
+fn chart_signature_keeps_only_last_twelve_candle_colors() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    let color_points = [
+        (10.0, 11.0),
+        (11.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 11.0),
+        (11.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 11.0),
+        (11.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 11.0),
+        (11.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 11.0),
+    ];
+
+    for (idx, (open, close)) in color_points.into_iter().enumerate() {
+        state.apply_kline(KlineUpdate {
+            candle: closed_colored_candle(
+                "BTCUSDT",
+                1_700_000_000_000 + (idx as i64 * 60_000),
+                open,
+                close,
+            ),
+        });
+    }
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(
+        packet.chart.signature,
+        Some("1m:R,DOJI,G,R,DOJI,G,R,DOJI,G,R,DOJI,G".to_string())
+    );
 }

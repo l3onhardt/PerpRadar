@@ -71,7 +71,8 @@ fn chart_signature(candles: &[Candle]) -> Option<String> {
         return None;
     }
 
-    let colors = candles
+    let signature_candles = &candles[candles.len().saturating_sub(12)..];
+    let colors = signature_candles
         .iter()
         .map(candle_color)
         .collect::<Vec<_>>()
