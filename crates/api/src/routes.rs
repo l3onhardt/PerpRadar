@@ -10,6 +10,9 @@ use crate::cache::PacketCache;
 use crate::debug;
 use crate::export::packet_to_text;
 
+pub const DEFAULT_LIMIT: usize = 20;
+pub const MAX_LIMIT: usize = 100;
+
 #[derive(Debug, Deserialize)]
 struct LimitQuery {
     limit: Option<usize>,
@@ -17,7 +20,7 @@ struct LimitQuery {
 
 impl LimitQuery {
     fn limit(&self) -> usize {
-        self.limit.unwrap_or(20)
+        self.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT)
     }
 }
 

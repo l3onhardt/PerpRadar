@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{header, Request, StatusCode};
 use chrono::{TimeZone, Utc};
 use perp_radar_api::cache::PacketCache;
 use perp_radar_api::routes::router;
@@ -12,11 +12,15 @@ use perp_radar_core::types::UniverseTier;
 use tower::ServiceExt;
 
 fn fixture_packet() -> StandardPacket {
+    packet_with("BTCUSDT", 1)
+}
+
+fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
     StandardPacket {
         packet_schema: "2.0".to_string(),
         ts: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
-        symbol: "BTCUSDT".to_string(),
-        rank: 1,
+        symbol: symbol.to_string(),
+        rank,
         profile: PacketProfile::Standard,
         universe: UniverseBlock {
             tier: UniverseTier::U2,
@@ -84,14 +88,23 @@ fn fixture_packet() -> StandardPacket {
 }
 
 fn app() -> axum::Router {
+    app_with(vec![fixture_packet()])
+}
+
+fn app_with(packets: Vec<StandardPacket>) -> axum::Router {
     let cache = PacketCache::default();
-    cache.upsert(fixture_packet());
+    for packet in packets {
+        cache.upsert(packet);
+    }
     router(cache)
 }
 
 async fn get(path: &str) -> axum::response::Response {
-    app()
-        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+    get_from(app(), path).await
+}
+
+async fn get_from(app: axum::Router, path: &str) -> axum::response::Response {
+    app.oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
         .unwrap()
 }
@@ -135,12 +148,19 @@ async fn export_top_jsonl_returns_packet_json_lines() {
     let response = get("/v1/export/top.jsonl?limit=1").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/x-ndjson; charset=utf-8"
+    );
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
 
-    assert!(text.contains("\"symbol\":\"BTCUSDT\""));
+    let lines = text.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1);
+    let json: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(json["symbol"], "BTCUSDT");
 }
 
 #[tokio::test]
@@ -148,4 +168,70 @@ async fn missing_packet_returns_not_found() {
     let response = get("/v1/packet/ETHUSDT").await;
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn packet_route_accepts_lowercase_symbol() {
+    let response = get("/v1/packet/btcusdt").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["symbol"], "BTCUSDT");
+}
+
+#[tokio::test]
+async fn top_packets_are_ranked_by_rank_then_symbol_and_truncated() {
+    let app = app_with(vec![
+        packet_with("SOLUSDT", 2),
+        packet_with("ETHUSDT", 2),
+        packet_with("BTCUSDT", 1),
+    ]);
+
+    let response = get_from(app, "/v1/packets/top?limit=2").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json.as_array().unwrap().len(), 2);
+    assert_eq!(json[0]["symbol"], "BTCUSDT");
+    assert_eq!(json[1]["symbol"], "ETHUSDT");
+}
+
+#[tokio::test]
+async fn export_limit_zero_returns_empty_response() {
+    let response = get("/v1/export/top.jsonl?limit=0").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn huge_export_limit_is_clamped_to_maximum() {
+    let packets = (0..105)
+        .map(|idx| packet_with(&format!("T{idx:03}USDT"), idx + 1))
+        .collect();
+    let response = get_from(app_with(packets), "/v1/export/top.jsonl?limit=1000").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    let lines = text.lines().collect::<Vec<_>>();
+
+    assert_eq!(lines.len(), 100);
+    assert!(lines
+        .iter()
+        .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok()));
 }
