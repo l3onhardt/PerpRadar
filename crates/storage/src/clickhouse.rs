@@ -31,9 +31,9 @@ pub async fn run_migrations(url: &str, database: &str) -> Result<Client> {
     let client = client(url, database);
     assert_clickhouse_ready(&client).await?;
 
-    for (name, sql) in migrations::all_ordered_sql() {
+    for (name, sql) in migrations::all_ordered_sql_for_database(database) {
         client
-            .query(sql)
+            .query(&sql)
             .execute()
             .await
             .with_context(|| format!("running ClickHouse migration {name}"))?;

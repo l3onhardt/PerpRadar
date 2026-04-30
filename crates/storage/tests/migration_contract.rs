@@ -1,8 +1,9 @@
 use std::future::Future;
 
 use perp_radar_storage::{
+    batcher::BatchConfig,
     clickhouse::run_migrations,
-    migrations::{migration_names, migration_sql},
+    migrations::{migration_names, migration_sql, migration_sql_for_database},
 };
 
 #[test]
@@ -56,4 +57,20 @@ fn run_migrations_returns_migrated_client() {
     }
 
     assert_return_type(run_migrations("http://localhost:8123", "perp_radar"));
+}
+
+#[test]
+fn migrations_can_be_rendered_for_configured_database() {
+    let sql = migration_sql_for_database("001_symbols.sql", r"custom-db`x").unwrap();
+
+    assert!(sql.contains(r"CREATE TABLE IF NOT EXISTS `custom-db\`x`.symbols"));
+    assert!(!sql.contains("perp_radar.symbols"));
+}
+
+#[test]
+fn batch_config_only_flushes_non_empty_batches_at_threshold() {
+    assert!(!BatchConfig::new(0, 1000).should_flush(0));
+    assert!(!BatchConfig::new(0, 1000).should_flush(1));
+    assert!(!BatchConfig::new(3, 1000).should_flush(2));
+    assert!(BatchConfig::new(3, 1000).should_flush(3));
 }

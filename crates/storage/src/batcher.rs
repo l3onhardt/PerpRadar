@@ -12,7 +12,7 @@ impl BatchConfig {
         }
     }
 
-    pub fn should_flush(&self, rows: usize, elapsed_ms: u64) -> bool {
-        rows >= self.max_rows || (rows > 0 && elapsed_ms >= self.flush_interval_ms)
+    pub fn should_flush(&self, pending_rows: usize) -> bool {
+        pending_rows > 0 && self.max_rows > 0 && pending_rows >= self.max_rows
     }
 }

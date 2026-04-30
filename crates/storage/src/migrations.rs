@@ -35,6 +35,27 @@ pub fn migration_sql(name: &str) -> Option<&'static str> {
         .find_map(|(migration_name, sql)| (*migration_name == name).then_some(*sql))
 }
 
+pub fn migration_sql_for_database(name: &str, database: &str) -> Option<String> {
+    migration_sql(name).map(|sql| render_sql_for_database(sql, database))
+}
+
 pub fn all_ordered_sql() -> Vec<(&'static str, &'static str)> {
     MIGRATIONS.to_vec()
+}
+
+pub fn all_ordered_sql_for_database(database: &str) -> Vec<(&'static str, String)> {
+    MIGRATIONS
+        .iter()
+        .map(|(name, sql)| (*name, render_sql_for_database(sql, database)))
+        .collect()
+}
+
+fn render_sql_for_database(sql: &str, database: &str) -> String {
+    let escaped_database = clickhouse::Client::default()
+        .query("?")
+        .bind(clickhouse::sql::Identifier(database))
+        .sql_display()
+        .to_string();
+
+    sql.replace("perp_radar.", &format!("{escaped_database}."))
 }
