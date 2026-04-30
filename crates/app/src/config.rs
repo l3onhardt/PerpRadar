@@ -1,6 +1,6 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::{net::SocketAddr, path::Path};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -51,21 +51,50 @@ pub struct PacketConfig {
 
 impl AppConfig {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
-        let path = resolve_config_path(path.as_ref());
         let config = ::config::Config::builder()
-            .add_source(::config::File::from(path.as_path()))
+            .add_source(::config::File::from(path.as_ref()))
             .build()?;
 
-        Ok(config.try_deserialize()?)
+        let config = config.try_deserialize()?;
+        validate_config(&config)?;
+        Ok(config)
     }
 }
 
-fn resolve_config_path(path: &Path) -> PathBuf {
-    if path.is_absolute() || path.exists() {
-        return path.to_path_buf();
+fn validate_config(config: &AppConfig) -> Result<()> {
+    if config.storage.clickhouse_url.trim().is_empty() {
+        bail!("storage.clickhouse_url must not be empty");
+    }
+    if config.storage.database.trim().is_empty() {
+        bail!("storage.database must not be empty");
+    }
+    if config.storage.batch_rows == 0 {
+        bail!("storage.batch_rows must be greater than 0");
+    }
+    if config.storage.batch_interval_ms == 0 {
+        bail!("storage.batch_interval_ms must be greater than 0");
+    }
+    if config.universe.active_n == 0 {
+        bail!("universe.active_n must be greater than 0");
+    }
+    if config.universe.focus_n == 0 {
+        bail!("universe.focus_n must be greater than 0");
+    }
+    if config.universe.focus_n > config.universe.active_n {
+        bail!("universe.focus_n must be less than or equal to universe.active_n");
+    }
+    if config.api.bind.trim().is_empty() {
+        bail!("api.bind must not be empty");
+    }
+    if config.api.bind.parse::<SocketAddr>().is_err() {
+        bail!("api.bind must be a valid socket address");
+    }
+    if config.packets.standard_interval_ms == 0 {
+        bail!("packets.standard_interval_ms must be greater than 0");
+    }
+    if config.packets.topk_refresh_ms == 0 {
+        bail!("packets.topk_refresh_ms must be greater than 0");
     }
 
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(path)
+    Ok(())
 }
