@@ -27,6 +27,15 @@ impl CandleRing {
         self.items.push_back(candle);
     }
 
+    pub fn replace_last(&mut self, candle: Candle) -> bool {
+        if let Some(last) = self.items.back_mut() {
+            *last = candle;
+            return true;
+        }
+
+        false
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

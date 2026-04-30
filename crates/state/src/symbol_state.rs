@@ -24,12 +24,26 @@ impl SymbolState {
         }
     }
 
-    pub fn apply_kline(&mut self, update: KlineUpdate) {
+    pub fn apply_kline(&mut self, update: KlineUpdate) -> bool {
         if !update.candle.is_closed {
-            return;
+            return false;
+        }
+
+        if update.candle.symbol != self.symbol {
+            return false;
         }
 
         if let Some(last) = self.candles_1m.last() {
+            if update.candle.open_time_ms < last.open_time_ms {
+                return false;
+            }
+
+            if update.candle.open_time_ms == last.open_time_ms {
+                self.candles_1m.replace_last(update.candle);
+                self.mark_kline_accepted();
+                return true;
+            }
+
             let expected_next = last.open_time_ms + 60_000;
             if update.candle.open_time_ms > expected_next {
                 let missed = ((update.candle.open_time_ms - expected_next) / 60_000) as u32;
@@ -38,7 +52,13 @@ impl SymbolState {
         }
 
         self.candles_1m.push(update.candle);
+        self.mark_kline_accepted();
+        true
+    }
+
+    fn mark_kline_accepted(&mut self) {
         self.quality.warm = self.candles_1m.len() >= 2;
         self.quality.stale = false;
+        self.quality.freshness_ms = 0;
     }
 }
