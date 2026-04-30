@@ -27,3 +27,14 @@ fn public_combined_stream_uses_public_base() {
         "wss://fstream.binance.com/public/stream?streams=btcusdt@depth20@500ms"
     );
 }
+
+#[test]
+fn combined_stream_rejects_empty_stream_list() {
+    let err = combined_stream_url(
+        WsBase::Market("wss://fstream.binance.com/market".to_string()),
+        &[],
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("at least one stream"));
+}

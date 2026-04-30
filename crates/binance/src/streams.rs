@@ -15,6 +15,8 @@ impl WsBase {
 }
 
 pub fn combined_stream_url(base: WsBase, streams: &[&str]) -> anyhow::Result<Url> {
+    anyhow::ensure!(!streams.is_empty(), "at least one stream is required");
+
     let joined = streams.join("/");
     let url = format!(
         "{}/stream?streams={}",
