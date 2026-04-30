@@ -43,7 +43,11 @@ fn standard_packet_serializes_null_metrics_and_reasons() {
         },
         carry: CarryBlock::default(),
         events: EventsBlock::default(),
-        scores: ScoresBlock::default(),
+        scores: ScoresBlock {
+            tcs: Some(0.81),
+            vov: Some(1.42),
+            ..ScoresBlock::default()
+        },
         quality: QualityState {
             freshness_ms: 384,
             warm: true,
@@ -60,8 +64,12 @@ fn standard_packet_serializes_null_metrics_and_reasons() {
     let json = serde_json::to_value(&packet).unwrap();
 
     assert_eq!(json["packet_schema"], "2.0");
+    assert_eq!(json["ts"], "2026-05-01T00:00:00Z");
     assert_eq!(json["profile"], "standard");
+    assert_eq!(json["universe"]["tier"], "U2");
     assert!(json["liquidity"]["liq_5bp_usd"].is_null());
+    assert_eq!(json["scores"]["TCS"], 0.81);
+    assert_eq!(json["scores"]["VoV"], 1.42);
     assert_eq!(json["quality"]["reasons"][0], "depth_coverage_lt_5bp");
 }
 
