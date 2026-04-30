@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 perp-radar-core = { path = "../core" }
+perp-radar-state = { path = "../state" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

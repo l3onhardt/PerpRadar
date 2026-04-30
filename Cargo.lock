@@ -1231,6 +1231,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "perp-radar-core",
+ "perp-radar-state",
  "reqwest",
  "serde",
  "serde_json",
