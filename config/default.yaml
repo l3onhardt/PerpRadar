@@ -1,0 +1,23 @@
+binance:
+  market_ws_base: "wss://fstream.binance.com/market"
+  public_ws_base: "wss://fstream.binance.com/public"
+  rest_base: "https://fapi.binance.com"
+universe:
+  quote_assets: ["USDT"]
+  contract_type: "PERPETUAL"
+  include_status: ["TRADING"]
+  active_n: 15
+  focus_n: 3
+  refresh_sec: 300
+  hysteresis_rank_buffer: 5
+  always_focus: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+storage:
+  clickhouse_url: "http://localhost:8123"
+  database: "perp_radar"
+  batch_rows: 2000
+  batch_interval_ms: 1000
+api:
+  bind: "127.0.0.1:8080"
+packets:
+  standard_interval_ms: 1000
+  topk_refresh_ms: 1000

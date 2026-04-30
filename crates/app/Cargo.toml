@@ -8,6 +8,10 @@ version.workspace = true
 name = "perp-radar"
 path = "src/main.rs"
 
+[lib]
+name = "perp_radar"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow.workspace = true
 config.workspace = true
