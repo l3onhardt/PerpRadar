@@ -2,7 +2,7 @@
 
 ClickHouse is required.
 
-Perp Radar depends on ClickHouse for runtime storage and packet materialization. Start ClickHouse before launching the application. On startup, the app checks storage connectivity, applies migrations, and exits if ClickHouse is missing or if migration execution fails.
+Perp Radar depends on ClickHouse for runtime storage and migrations. Start ClickHouse before launching the application. On startup, the current binary checks storage connectivity, applies migrations, logs readiness, and exits if ClickHouse is missing or if migration execution fails.
 
 ## Startup
 
@@ -12,11 +12,13 @@ Default local startup:
 cargo run -p perp-radar
 ```
 
-After startup, run:
+For API-enabled builds, when the runtime HTTP server is running, run:
 
 ```bash
 curl http://127.0.0.1:8080/v1/health
 ```
+
+Use this API check only for builds where the HTTP runtime is wired and serving requests.
 
 ## Binance REST Budget
 
