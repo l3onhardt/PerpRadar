@@ -40,7 +40,9 @@ fn missing_relative_config_does_not_fall_back_to_checkout_root() -> anyhow::Resu
 
 #[test]
 fn rejects_invalid_startup_critical_config_values() -> anyhow::Result<()> {
-    let cases: [(&str, fn(&mut CriticalConfig), &str); 11] = [
+    type ConfigCase = (&'static str, fn(&mut CriticalConfig), &'static str);
+
+    let cases: [ConfigCase; 11] = [
         (
             "empty-clickhouse-url",
             |config: &mut CriticalConfig| config.storage_clickhouse_url = "".to_string(),
