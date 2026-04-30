@@ -27,9 +27,59 @@ fn partial_book_calculates_spread_imbalance_and_microprice() {
         ],
     );
 
-    assert!((book.spread_bp().unwrap() - 10.0).abs() < 0.0001);
-    assert!((book.imbalance_top_n(1).unwrap() - 0.25).abs() < 0.0001);
+    let expected_spread_bp = (100.1 - 100.0) / ((100.0 + 100.1) / 2.0) * 10_000.0;
+    let expected_imbalance = ((100.0 * 10.0) - (100.1 * 6.0)) / ((100.0 * 10.0) + (100.1 * 6.0));
+
+    assert!((book.spread_bp().unwrap() - expected_spread_bp).abs() < 0.0001);
+    assert!((book.imbalance_top_n(1).unwrap() - expected_imbalance).abs() < 0.0001);
     assert!(book.microprice_bp().unwrap() > 0.0);
+}
+
+#[test]
+fn partial_book_microprice_is_none_when_top_quantities_are_zero() {
+    let book = PartialBook::new(
+        "BTCUSDT",
+        vec![BookLevel {
+            price: 100.0,
+            qty: 0.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 0.0,
+        }],
+    );
+
+    assert_eq!(book.microprice_bp(), None);
+}
+
+#[test]
+fn full_book_accepts_first_delta_that_covers_snapshot() {
+    let mut book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    );
+
+    let result = book.apply_delta(BookDelta {
+        first_update_id: 8,
+        final_update_id: 11,
+        previous_final_update_id: 7,
+        bids: vec![LevelDelta {
+            price: 100.0,
+            qty: 11.0,
+        }],
+        asks: vec![],
+    });
+
+    assert!(result.is_ok());
+    assert!(book.seq_ok());
 }
 
 #[test]

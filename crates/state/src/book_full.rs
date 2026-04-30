@@ -30,6 +30,7 @@ pub struct FullBook {
     symbol: String,
     last_update_id: u64,
     seq_ok: bool,
+    bootstrapped: bool,
     bids: BTreeMap<i64, f64>,
     asks: BTreeMap<i64, f64>,
 }
@@ -45,13 +46,21 @@ impl FullBook {
             symbol: symbol.into(),
             last_update_id,
             seq_ok: true,
+            bootstrapped: false,
             bids: levels_to_map(bids),
             asks: levels_to_map(asks),
         }
     }
 
     pub fn apply_delta(&mut self, delta: BookDelta) -> Result<(), FullBookError> {
-        if delta.previous_final_update_id != self.last_update_id {
+        let sequence_ok = if self.bootstrapped {
+            delta.previous_final_update_id == self.last_update_id
+        } else {
+            delta.first_update_id <= self.last_update_id
+                && delta.final_update_id >= self.last_update_id
+        };
+
+        if !sequence_ok {
             self.seq_ok = false;
             return Err(FullBookError::SequenceGap);
         }
@@ -60,6 +69,7 @@ impl FullBook {
         apply_levels(&mut self.asks, delta.asks);
         self.last_update_id = delta.final_update_id;
         self.seq_ok = true;
+        self.bootstrapped = true;
         Ok(())
     }
 
