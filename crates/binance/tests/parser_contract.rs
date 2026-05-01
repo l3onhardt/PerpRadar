@@ -112,6 +112,97 @@ fn parses_exact_depth20_500ms_partial_depth_stream() {
 }
 
 #[test]
+fn parses_all_market_mark_price_array_event() {
+    let payload = r#"{
+      "stream":"!markPrice@arr",
+      "data":[
+        {
+          "e":"markPriceUpdate",
+          "E":1714521600000,
+          "s":"BTCUSDT",
+          "p":"64100.0",
+          "i":"64080.0",
+          "r":"0.0001",
+          "T":1714550400000
+        }
+      ]
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    match event {
+        BinanceEvent::MarkPrices(mark_prices) => {
+            assert_eq!(mark_prices.len(), 1);
+            assert_eq!(mark_prices[0].symbol, "BTCUSDT");
+            assert_eq!(mark_prices[0].mark_price, 64100.0);
+            assert_eq!(mark_prices[0].index_price, 64080.0);
+            assert_eq!(mark_prices[0].funding_rate, 0.0001);
+            assert_eq!(mark_prices[0].next_funding_time_ms, 1714550400000);
+        }
+        other => panic!("expected mark price array event, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_all_market_ticker_array_event() {
+    let payload = r#"{
+      "stream":"!ticker@arr",
+      "data":[
+        {
+          "e":"24hrTicker",
+          "E":1714521600000,
+          "s":"BTCUSDT",
+          "c":"64100.0",
+          "q":"123456789.5",
+          "P":"1.25"
+        }
+      ]
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    match event {
+        BinanceEvent::Tickers(tickers) => {
+            assert_eq!(tickers.len(), 1);
+            assert_eq!(tickers[0].symbol, "BTCUSDT");
+            assert_eq!(tickers[0].last_price, 64100.0);
+            assert_eq!(tickers[0].quote_volume_24h, 123456789.5);
+            assert_eq!(tickers[0].price_change_percent_24h, 1.25);
+        }
+        other => panic!("expected ticker array event, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_all_market_force_order_array_event() {
+    let payload = r#"{
+      "stream":"!forceOrder@arr",
+      "data":{
+        "e":"forceOrder",
+        "E":1714521600000,
+        "o":{
+          "s":"BTCUSDT",
+          "S":"SELL",
+          "p":"64000.0",
+          "q":"2.5",
+          "T":1714521599000
+        }
+      }
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    match event {
+        BinanceEvent::ForceOrder(force_order) => {
+            assert_eq!(force_order.symbol, "BTCUSDT");
+            assert_eq!(force_order.side, "SELL");
+            assert_eq!(force_order.price, 64000.0);
+            assert_eq!(force_order.qty, 2.5);
+            assert_eq!(force_order.event_time_ms, 1714521600000);
+            assert_eq!(force_order.order_time_ms, 1714521599000);
+        }
+        other => panic!("expected force order event, got {other:?}"),
+    }
+}
+
+#[test]
 fn ignores_malformed_partial_depth_interval() {
     let payload = r#"{
       "stream":"btcusdt@depth20@bad",

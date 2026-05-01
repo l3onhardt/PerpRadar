@@ -10,6 +10,9 @@ pub enum BinanceEvent {
     Kline(KlineEvent),
     Depth(DepthEvent),
     PartialDepth(PartialDepthEvent),
+    MarkPrices(Vec<MarkPriceEvent>),
+    Tickers(Vec<TickerEvent>),
+    ForceOrder(ForceOrderEvent),
     Ignored,
 }
 
@@ -39,6 +42,35 @@ pub struct PartialDepthEvent {
     pub asks: Vec<BookLevel>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarkPriceEvent {
+    pub symbol: String,
+    pub mark_price: f64,
+    pub index_price: f64,
+    pub funding_rate: f64,
+    pub next_funding_time_ms: i64,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TickerEvent {
+    pub symbol: String,
+    pub last_price: f64,
+    pub quote_volume_24h: f64,
+    pub price_change_percent_24h: f64,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForceOrderEvent {
+    pub symbol: String,
+    pub side: String,
+    pub price: f64,
+    pub qty: f64,
+    pub event_time_ms: i64,
+    pub order_time_ms: i64,
+}
+
 #[derive(Debug, Deserialize)]
 struct CombinedPayload {
     stream: String,
@@ -50,12 +82,15 @@ pub fn parse_combined_event(payload: &str) -> anyhow::Result<BinanceEvent> {
     match combined.data.get("e").and_then(|value| value.as_str()) {
         Some("kline") => parse_kline(combined.stream, combined.data),
         Some("depthUpdate") => parse_depth(combined.stream, combined.data),
+        Some("forceOrder") => parse_force_order(combined.data),
         _ if is_partial_depth_stream(&combined.stream) => {
             parse_partial_depth(combined.stream, combined.data)
         }
         _ if is_empty_symbol_partial_depth_stream(&combined.stream) => {
             parse_partial_depth(combined.stream, combined.data)
         }
+        _ if combined.stream == "!markPrice@arr" => parse_mark_prices(combined.data),
+        _ if combined.stream == "!ticker@arr" => parse_tickers(combined.data),
         _ => Ok(BinanceEvent::Ignored),
     }
 }
@@ -179,6 +214,110 @@ fn parse_partial_depth(stream: String, data: serde_json::Value) -> anyhow::Resul
         last_update_id: depth.last_update_id,
         bids: parse_book_levels("bids", depth.bids)?,
         asks: parse_book_levels("asks", depth.asks)?,
+    }))
+}
+
+fn parse_mark_prices(data: serde_json::Value) -> anyhow::Result<BinanceEvent> {
+    #[derive(Debug, Deserialize)]
+    struct MarkPricePayload {
+        #[serde(rename = "E")]
+        event_time_ms: i64,
+        #[serde(rename = "s")]
+        symbol: String,
+        #[serde(rename = "p")]
+        mark_price: String,
+        #[serde(rename = "i")]
+        index_price: String,
+        #[serde(rename = "r")]
+        funding_rate: String,
+        #[serde(rename = "T")]
+        next_funding_time_ms: i64,
+    }
+
+    let updates: Vec<MarkPricePayload> = serde_json::from_value(data)?;
+    Ok(BinanceEvent::MarkPrices(
+        updates
+            .into_iter()
+            .map(|update| {
+                Ok(MarkPriceEvent {
+                    symbol: update.symbol,
+                    mark_price: parse_positive_decimal(&update.mark_price, "p")?,
+                    index_price: parse_positive_decimal(&update.index_price, "i")?,
+                    funding_rate: parse_finite_decimal(&update.funding_rate, "r")?,
+                    next_funding_time_ms: update.next_funding_time_ms,
+                    event_time_ms: update.event_time_ms,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    ))
+}
+
+fn parse_tickers(data: serde_json::Value) -> anyhow::Result<BinanceEvent> {
+    #[derive(Debug, Deserialize)]
+    struct TickerPayload {
+        #[serde(rename = "E")]
+        event_time_ms: i64,
+        #[serde(rename = "s")]
+        symbol: String,
+        #[serde(rename = "c")]
+        last_price: String,
+        #[serde(rename = "q")]
+        quote_volume_24h: String,
+        #[serde(rename = "P")]
+        price_change_percent_24h: String,
+    }
+
+    let updates: Vec<TickerPayload> = serde_json::from_value(data)?;
+    Ok(BinanceEvent::Tickers(
+        updates
+            .into_iter()
+            .map(|update| {
+                Ok(TickerEvent {
+                    symbol: update.symbol,
+                    last_price: parse_positive_decimal(&update.last_price, "c")?,
+                    quote_volume_24h: parse_non_negative_decimal(&update.quote_volume_24h, "q")?,
+                    price_change_percent_24h: parse_finite_decimal(
+                        &update.price_change_percent_24h,
+                        "P",
+                    )?,
+                    event_time_ms: update.event_time_ms,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    ))
+}
+
+fn parse_force_order(data: serde_json::Value) -> anyhow::Result<BinanceEvent> {
+    #[derive(Debug, Deserialize)]
+    struct ForceOrderEnvelope {
+        #[serde(rename = "E")]
+        event_time_ms: i64,
+        #[serde(rename = "o")]
+        order: ForceOrderPayload,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ForceOrderPayload {
+        #[serde(rename = "s")]
+        symbol: String,
+        #[serde(rename = "S")]
+        side: String,
+        #[serde(rename = "p")]
+        price: String,
+        #[serde(rename = "q")]
+        qty: String,
+        #[serde(rename = "T")]
+        order_time_ms: i64,
+    }
+
+    let envelope: ForceOrderEnvelope = serde_json::from_value(data)?;
+    Ok(BinanceEvent::ForceOrder(ForceOrderEvent {
+        symbol: envelope.order.symbol,
+        side: envelope.order.side,
+        price: parse_positive_decimal(&envelope.order.price, "p")?,
+        qty: parse_positive_decimal(&envelope.order.qty, "q")?,
+        event_time_ms: envelope.event_time_ms,
+        order_time_ms: envelope.order.order_time_ms,
     }))
 }
 

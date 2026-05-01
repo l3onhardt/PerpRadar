@@ -1,5 +1,5 @@
 use perp_radar::config::AppConfig;
-use perp_radar::runtime::{build_ws_urls, serve_api};
+use perp_radar::runtime::{build_ws_urls, serve_api, start_ingestion_tasks};
 use perp_radar::supervisor::verify_required_storage;
 use perp_radar_api::cache::PacketCache;
 
@@ -18,5 +18,8 @@ async fn main() -> anyhow::Result<()> {
         "perp-radar serving API"
     );
 
-    serve_api(&config, PacketCache::default()).await
+    let cache = PacketCache::default();
+    let _ingestion_tasks = start_ingestion_tasks(&config, cache.clone(), ws_urls);
+
+    serve_api(&config, cache).await
 }

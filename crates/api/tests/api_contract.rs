@@ -40,6 +40,10 @@ fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
         chart: ChartBlock {
             regime: Some("trend".to_string()),
             signature: Some("higher_high".to_string()),
+            rsi_14: Some(58.0),
+            atr_pct: Some(0.012),
+            bb_width: Some(0.05),
+            ..ChartBlock::default()
         },
         liquidity: LiquidityBlock {
             book_mode: "partial20".to_string(),
@@ -62,6 +66,7 @@ fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
         events: EventsBlock {
             liq_1m_usd: Some(10_000.0),
             liq_5m_usd: Some(50_000.0),
+            liq_15m_usd: Some(80_000.0),
             liq_side: Some("long".to_string()),
             volume_spike_z: Some(1.8),
         },
@@ -133,6 +138,8 @@ async fn export_top_text_returns_llm_readable_packet() {
     let text = String::from_utf8(body.to_vec()).unwrap();
 
     assert!(text.contains("[BTCUSDT]"));
+    assert!(text.contains("chart:"));
+    assert!(text.contains("rsi14=58"));
     assert!(text.contains("quality:"));
 }
 

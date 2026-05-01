@@ -1,8 +1,44 @@
+use perp_radar_core::types::Candle;
 use perp_radar_features::funding::z_score;
 use perp_radar_features::liquidity::liquidity_quality;
 use perp_radar_features::ranking::{rank_candidates, Candidate};
 use perp_radar_features::scores::{composite_candidate_score, ScoreInputs};
-use perp_radar_features::ta::{return_pct, simple_rsi};
+use perp_radar_features::ta::{return_pct, simple_rsi, technical_snapshot};
+
+fn candle(idx: usize, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Candle {
+    Candle {
+        symbol: "BTCUSDT".to_string(),
+        open_time_ms: 1_700_000_000_000 + (idx as i64 * 60_000),
+        close_time_ms: 1_700_000_059_999 + (idx as i64 * 60_000),
+        open,
+        high,
+        low,
+        close,
+        volume_base: volume,
+        volume_quote: volume * close,
+        trades: volume as u64,
+        taker_buy_base: volume * 0.6,
+        taker_buy_quote: volume * close * 0.6,
+        is_closed: true,
+        source: "test".to_string(),
+    }
+}
+
+fn fixture_candles(count: usize) -> Vec<Candle> {
+    (0..count)
+        .map(|idx| {
+            let close = 100.0 + idx as f64 + ((idx % 5) as f64 * 0.2);
+            candle(
+                idx,
+                close - 0.7,
+                close + 1.2,
+                close - 1.4,
+                close,
+                100.0 + idx as f64,
+            )
+        })
+        .collect()
+}
 
 #[test]
 fn return_pct_uses_decimal_return() {
@@ -137,4 +173,29 @@ fn liquidity_quality_rejects_invalid_inputs() {
     assert!(liquidity_quality(Some(1.0), Some(f64::NAN)).is_none());
     assert!(liquidity_quality(Some(f64::INFINITY), Some(5.0)).is_none());
     assert!(liquidity_quality(Some(1.0), Some(f64::INFINITY)).is_none());
+}
+
+#[test]
+fn technical_snapshot_computes_v1_chart_indicators() {
+    let candles = fixture_candles(64);
+
+    let snapshot = technical_snapshot(&candles).unwrap();
+
+    assert!(snapshot.ema_20.unwrap() > 140.0);
+    assert!(snapshot.ema_50.unwrap() > 125.0);
+    assert!(snapshot.rsi_14.unwrap() > 70.0);
+    assert!(snapshot.macd_histogram.unwrap().is_finite());
+    assert!(snapshot.atr_pct.unwrap() > 0.0);
+    assert!(snapshot.bb_width.unwrap() > 0.0);
+    assert!(snapshot.adx_14.unwrap() > 0.0);
+    assert!(snapshot.vwap_20.unwrap() > 140.0);
+    assert!(snapshot.cmf_20.unwrap().abs() <= 1.0);
+    assert_eq!(snapshot.regime.as_deref(), Some("trend_up"));
+}
+
+#[test]
+fn technical_snapshot_requires_enough_closed_candles() {
+    let candles = fixture_candles(10);
+
+    assert_eq!(technical_snapshot(&candles), None);
 }

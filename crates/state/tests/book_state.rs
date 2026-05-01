@@ -153,3 +153,52 @@ fn full_book_rejects_sequence_gap() {
     assert!(result.is_err());
     assert!(!book.seq_ok());
 }
+
+#[test]
+fn full_book_calculates_visible_liquidity_and_slippage() {
+    let book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![
+            BookLevel {
+                price: 100.0,
+                qty: 10.0,
+            },
+            BookLevel {
+                price: 99.96,
+                qty: 5.0,
+            },
+            BookLevel {
+                price: 99.90,
+                qty: 20.0,
+            },
+        ],
+        vec![
+            BookLevel {
+                price: 100.1,
+                qty: 6.0,
+            },
+            BookLevel {
+                price: 100.14,
+                qty: 8.0,
+            },
+            BookLevel {
+                price: 100.20,
+                qty: 12.0,
+            },
+        ],
+    );
+
+    assert_eq!(book.best_bid(), Some(100.0));
+    assert_eq!(book.best_ask(), Some(100.1));
+    assert_eq!(
+        book.visible_liquidity_usd(5.0).unwrap(),
+        100.0 * 10.0 + 100.1 * 6.0
+    );
+    assert_eq!(
+        book.visible_liquidity_usd(10.0).unwrap(),
+        100.0 * 10.0 + 99.96 * 5.0 + 100.1 * 6.0 + 100.14 * 8.0
+    );
+    assert!(book.slippage_bp_for_notional(1_000.0, true).unwrap() > 0.0);
+    assert!(book.slippage_bp_for_notional(1_000.0, false).unwrap() > 0.0);
+}

@@ -35,6 +35,15 @@ pub struct PriceBlock {
 pub struct ChartBlock {
     pub regime: Option<String>,
     pub signature: Option<String>,
+    pub ema_20: Option<f64>,
+    pub ema_50: Option<f64>,
+    pub rsi_14: Option<f64>,
+    pub macd_histogram: Option<f64>,
+    pub atr_pct: Option<f64>,
+    pub bb_width: Option<f64>,
+    pub adx_14: Option<f64>,
+    pub vwap_20: Option<f64>,
+    pub cmf_20: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -63,6 +72,7 @@ pub struct CarryBlock {
 pub struct EventsBlock {
     pub liq_1m_usd: Option<f64>,
     pub liq_5m_usd: Option<f64>,
+    pub liq_15m_usd: Option<f64>,
     pub liq_side: Option<String>,
     pub volume_spike_z: Option<f64>,
 }

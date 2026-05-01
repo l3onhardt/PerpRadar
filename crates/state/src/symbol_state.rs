@@ -1,6 +1,9 @@
-use perp_radar_core::quality::QualityState;
+use chrono::{DateTime, Utc};
+use perp_radar_core::quality::{QualityReason, QualityState};
 use perp_radar_core::types::Candle;
 
+use crate::book_full::{BookDelta, FullBook};
+use crate::book_partial::{BookLevel, PartialBook};
 use crate::candle_ring::CandleRing;
 
 #[derive(Debug, Clone)]
@@ -9,9 +12,80 @@ pub struct KlineUpdate {
 }
 
 #[derive(Debug, Clone)]
+pub struct MarkPriceUpdate {
+    pub symbol: String,
+    pub mark_price: f64,
+    pub index_price: f64,
+    pub funding_rate: f64,
+    pub next_funding_time_ms: i64,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TickerUpdate {
+    pub symbol: String,
+    pub last_price: f64,
+    pub quote_volume_24h: f64,
+    pub price_change_percent_24h: f64,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartialDepthUpdate {
+    pub symbol: String,
+    pub last_update_id: u64,
+    pub bids: Vec<BookLevel>,
+    pub asks: Vec<BookLevel>,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FullDepthSnapshotUpdate {
+    pub symbol: String,
+    pub last_update_id: u64,
+    pub bids: Vec<BookLevel>,
+    pub asks: Vec<BookLevel>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FullDepthDeltaUpdate {
+    pub symbol: String,
+    pub delta: BookDelta,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForceOrderUpdate {
+    pub symbol: String,
+    pub side: String,
+    pub price: f64,
+    pub qty: f64,
+    pub event_time_ms: i64,
+    pub order_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LiquidationEvent {
+    pub side: String,
+    pub notional_usd: f64,
+    pub event_time_ms: i64,
+    pub order_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct SymbolState {
     pub symbol: String,
     pub candles_1m: CandleRing,
+    pub mark_price: Option<f64>,
+    pub index_price: Option<f64>,
+    pub funding_rate: Option<f64>,
+    pub funding_history: Vec<f64>,
+    pub next_funding_time: Option<DateTime<Utc>>,
+    pub last_price: Option<f64>,
+    pub quote_volume_24h: Option<f64>,
+    pub price_change_percent_24h: Option<f64>,
+    pub partial_book: Option<PartialBook>,
+    pub full_book: Option<FullBook>,
+    pub liquidations: Vec<LiquidationEvent>,
     pub quality: QualityState,
 }
 
@@ -20,6 +94,17 @@ impl SymbolState {
         Self {
             symbol: symbol.into(),
             candles_1m: CandleRing::new(candle_capacity),
+            mark_price: None,
+            index_price: None,
+            funding_rate: None,
+            funding_history: Vec::new(),
+            next_funding_time: None,
+            last_price: None,
+            quote_volume_24h: None,
+            price_change_percent_24h: None,
+            partial_book: None,
+            full_book: None,
+            liquidations: Vec::new(),
             quality: QualityState::cold("none"),
         }
     }
@@ -61,4 +146,146 @@ impl SymbolState {
         self.quality.stale = false;
         self.quality.freshness_ms = 0;
     }
+
+    pub fn apply_mark_price(&mut self, update: MarkPriceUpdate) -> bool {
+        if update.symbol != self.symbol
+            || !update.mark_price.is_finite()
+            || !update.index_price.is_finite()
+            || !update.funding_rate.is_finite()
+        {
+            return false;
+        }
+
+        self.mark_price = Some(update.mark_price);
+        self.index_price = Some(update.index_price);
+        self.funding_rate = Some(update.funding_rate);
+        self.next_funding_time = DateTime::from_timestamp_millis(update.next_funding_time_ms);
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        true
+    }
+
+    pub fn apply_ticker(&mut self, update: TickerUpdate) -> bool {
+        if update.symbol != self.symbol
+            || !update.last_price.is_finite()
+            || !update.quote_volume_24h.is_finite()
+            || !update.price_change_percent_24h.is_finite()
+        {
+            return false;
+        }
+
+        self.last_price = Some(update.last_price);
+        self.quote_volume_24h = Some(update.quote_volume_24h);
+        self.price_change_percent_24h = Some(update.price_change_percent_24h);
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        true
+    }
+
+    pub fn apply_partial_depth(&mut self, update: PartialDepthUpdate) -> bool {
+        if update.symbol != self.symbol {
+            return false;
+        }
+
+        self.partial_book = Some(PartialBook::new(update.symbol, update.bids, update.asks));
+        self.quality.book_mode = "partial20".to_string();
+        self.quality.book_seq_ok = None;
+        self.quality.book_depth_coverage_bp =
+            self.partial_book.as_ref().and_then(book_depth_coverage_bp);
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        true
+    }
+
+    pub fn apply_force_order(&mut self, update: ForceOrderUpdate) -> bool {
+        if update.symbol != self.symbol || !update.price.is_finite() || !update.qty.is_finite() {
+            return false;
+        }
+
+        self.liquidations.push(LiquidationEvent {
+            side: update.side,
+            notional_usd: update.price * update.qty,
+            event_time_ms: update.event_time_ms,
+            order_time_ms: update.order_time_ms,
+        });
+        if self.liquidations.len() > 512 {
+            let overflow = self.liquidations.len() - 512;
+            self.liquidations.drain(0..overflow);
+        }
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        true
+    }
+
+    pub fn apply_full_depth_snapshot(&mut self, update: FullDepthSnapshotUpdate) -> bool {
+        if update.symbol != self.symbol {
+            return false;
+        }
+
+        self.full_book = Some(FullBook::from_snapshot(
+            update.symbol,
+            update.last_update_id,
+            update.bids,
+            update.asks,
+        ));
+        self.quality.book_mode = "full".to_string();
+        self.quality.book_seq_ok = Some(true);
+        self.quality.book_depth_coverage_bp = self
+            .full_book
+            .as_ref()
+            .and_then(|book| book.visible_liquidity_usd(10.0).map(|_| 10.0));
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        true
+    }
+
+    pub fn apply_full_depth_delta(&mut self, update: FullDepthDeltaUpdate) -> bool {
+        if update.symbol != self.symbol {
+            return false;
+        }
+        let Some(book) = self.full_book.as_mut() else {
+            return false;
+        };
+
+        match book.apply_delta(update.delta) {
+            Ok(()) => {
+                self.quality.book_mode = "full".to_string();
+                self.quality.book_seq_ok = Some(true);
+                self.quality.freshness_ms = 0;
+                self.quality.stale = false;
+                true
+            }
+            Err(_) => {
+                self.quality.book_seq_ok = Some(false);
+                self.quality.add_reason(QualityReason::FullBookSequenceGap);
+                false
+            }
+        }
+    }
+
+    pub fn apply_funding_history(&mut self, symbol: &str, rates: Vec<f64>) -> bool {
+        if symbol != self.symbol || rates.iter().any(|rate| !rate.is_finite()) {
+            return false;
+        }
+
+        self.funding_history = rates;
+        self.quality.funding_history_points = self.funding_history.len();
+        true
+    }
+}
+
+fn book_depth_coverage_bp(book: &PartialBook) -> Option<f64> {
+    let mid = book.mid()?;
+    if mid <= 0.0 {
+        return None;
+    }
+    let bid_coverage = book
+        .bids
+        .last()
+        .map(|level| (mid - level.price).max(0.0) / mid * 10_000.0)?;
+    let ask_coverage = book
+        .asks
+        .last()
+        .map(|level| (level.price - mid).max(0.0) / mid * 10_000.0)?;
+    Some(bid_coverage.min(ask_coverage))
 }
