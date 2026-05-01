@@ -1283,6 +1283,7 @@ dependencies = [
  "perp-radar-core",
  "serde",
  "tokio",
+ "url",
 ]
 
 [[package]]

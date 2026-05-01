@@ -1,13 +1,15 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:24.12
+    image: clickhouse/clickhouse-server:25.3
     ports:
       - "8123:8123"
       - "9000:9000"
     environment:
       CLICKHOUSE_DB: perp_radar
+      CLICKHOUSE_USER: perp_radar
+      CLICKHOUSE_PASSWORD: perp_radar
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      test: ["CMD-SHELL", "wget -qO- --user=$$CLICKHOUSE_USER --password=$$CLICKHOUSE_PASSWORD http://localhost:8123/ping | grep -q Ok"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -32,7 +34,7 @@ services:
       - "8080:8080"
     environment:
       PERP_RADAR__API__BIND: "0.0.0.0:8080"
-      PERP_RADAR__STORAGE__CLICKHOUSE_URL: "http://clickhouse:8123"
+      PERP_RADAR__STORAGE__CLICKHOUSE_URL: "http://perp_radar:perp_radar@clickhouse:8123"
       PERP_RADAR__BINANCE__REST_BASE: "http://mock-binance:9000"
       PERP_RADAR__BINANCE__MARKET_WS_BASE: "ws://mock-binance:9000/market"
       PERP_RADAR__BINANCE__PUBLIC_WS_BASE: "ws://mock-binance:9000/public"

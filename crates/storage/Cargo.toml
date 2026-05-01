@@ -11,3 +11,4 @@ clickhouse.workspace = true
 perp-radar-core = { path = "../core" }
 serde.workspace = true
 tokio.workspace = true
+url.workspace = true

@@ -277,6 +277,41 @@ fn symbol_state_tracks_full_depth_snapshot_for_u2_liquidity() {
 }
 
 #[test]
+fn symbol_state_keeps_full_book_quality_when_partial_depth_arrives() {
+    let mut state = SymbolState::new("BTCUSDT", 10);
+
+    state.apply_full_depth_snapshot(FullDepthSnapshotUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 10,
+        bids: vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    });
+
+    assert!(state.apply_partial_depth(PartialDepthUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 11,
+        bids: vec![BookLevel {
+            price: 99.9,
+            qty: 1.0,
+        }],
+        asks: vec![BookLevel {
+            price: 100.2,
+            qty: 1.0,
+        }],
+        event_time_ms: 1_714_521_600_000,
+    }));
+
+    assert_eq!(state.quality.book_mode, "full");
+    assert_eq!(state.quality.book_seq_ok, Some(true));
+}
+
+#[test]
 fn symbol_state_applies_full_depth_delta_and_marks_sequence_gap() {
     let mut state = SymbolState::new("BTCUSDT", 10);
     state.apply_full_depth_snapshot(FullDepthSnapshotUpdate {

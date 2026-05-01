@@ -25,7 +25,7 @@ fn compose_file_wires_app_clickhouse_and_mock_binance() {
         "{}/../../docker-compose.yml",
         env!("CARGO_MANIFEST_DIR")
     ))
-        .unwrap_or_else(|error| panic!("docker-compose.yml should exist: {error}"));
+    .unwrap_or_else(|error| panic!("docker-compose.yml should exist: {error}"));
 
     assert!(compose.contains("clickhouse"));
     assert!(compose.contains("perp-radar"));

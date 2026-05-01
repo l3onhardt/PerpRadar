@@ -426,13 +426,14 @@ impl RuntimeEngine {
 
     fn refresh_symbol_with_rank(&self, symbol: &str, rank: usize) {
         if let Some(state) = self.states.get(symbol) {
-            self.cache.upsert(build_standard_packet_with_funding_interval(
-                state,
-                rank,
-                self.active_n,
-                self.focus_n,
-                self.funding_interval_hours,
-            ));
+            self.cache
+                .upsert(build_standard_packet_with_funding_interval(
+                    state,
+                    rank,
+                    self.active_n,
+                    self.focus_n,
+                    self.funding_interval_hours,
+                ));
         }
     }
 }

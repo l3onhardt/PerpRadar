@@ -1,14 +1,37 @@
 use anyhow::{Context, Result};
 use clickhouse::Client;
+use url::Url;
 
 use crate::migrations;
 
 pub fn client(url: &str, database: &str) -> Client {
-    Client::default().with_url(url).with_database(database)
+    client_with_auth(url).with_database(database)
 }
 
 pub fn admin_client(url: &str) -> Client {
-    Client::default().with_url(url)
+    client_with_auth(url)
+}
+
+fn client_with_auth(raw_url: &str) -> Client {
+    let Ok(mut parsed) = Url::parse(raw_url) else {
+        return Client::default().with_url(raw_url);
+    };
+
+    let user = parsed.username().to_string();
+    let password = parsed.password().unwrap_or("").to_string();
+    if user.is_empty() {
+        return Client::default().with_url(parsed.as_str());
+    }
+
+    if !user.is_empty() {
+        let _ = parsed.set_username("");
+        let _ = parsed.set_password(None);
+    }
+
+    Client::default()
+        .with_url(parsed.as_str())
+        .with_user(user)
+        .with_password(password)
 }
 
 pub async fn assert_clickhouse_ready(client: &Client) -> Result<()> {

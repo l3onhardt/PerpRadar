@@ -196,14 +196,16 @@ impl SymbolState {
         }
 
         self.partial_book = Some(PartialBook::new(update.symbol, update.bids, update.asks));
-        self.quality.book_mode = "partial20".to_string();
-        self.quality.book_seq_ok = None;
-        self.quality.book_depth_coverage_bp =
-            self.partial_book.as_ref().and_then(book_depth_coverage_bp);
-        if self.quality.book_depth_coverage_bp.unwrap_or(0.0) < 5.0 {
-            self.quality.add_reason(QualityReason::DepthCoverageLt5Bp);
-        } else {
-            self.quality.clear_reason(QualityReason::DepthCoverageLt5Bp);
+        if self.full_book.is_none() {
+            self.quality.book_mode = "partial20".to_string();
+            self.quality.book_seq_ok = None;
+            self.quality.book_depth_coverage_bp =
+                self.partial_book.as_ref().and_then(book_depth_coverage_bp);
+            if self.quality.book_depth_coverage_bp.unwrap_or(0.0) < 5.0 {
+                self.quality.add_reason(QualityReason::DepthCoverageLt5Bp);
+            } else {
+                self.quality.clear_reason(QualityReason::DepthCoverageLt5Bp);
+            }
         }
         self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
@@ -255,7 +257,8 @@ impl SymbolState {
             .full_book
             .as_ref()
             .and_then(|book| book.visible_liquidity_usd(10.0).map(|_| 10.0));
-        self.quality.clear_reason(QualityReason::FullBookSequenceGap);
+        self.quality
+            .clear_reason(QualityReason::FullBookSequenceGap);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
         self.quality.clear_reason(QualityReason::StaleMarketData);
@@ -276,7 +279,8 @@ impl SymbolState {
                 self.quality.book_seq_ok = Some(true);
                 self.quality.freshness_ms = 0;
                 self.quality.stale = false;
-                self.quality.clear_reason(QualityReason::FullBookSequenceGap);
+                self.quality
+                    .clear_reason(QualityReason::FullBookSequenceGap);
                 self.quality.clear_reason(QualityReason::StaleMarketData);
                 true
             }

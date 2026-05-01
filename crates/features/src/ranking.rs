@@ -39,10 +39,7 @@ pub fn rank_candidates(mut candidates: Vec<Candidate>) -> Vec<RankedCandidate> {
         .collect()
 }
 
-pub fn rank_u0_universe(
-    inputs: Vec<UniverseRankingInput>,
-    limit: usize,
-) -> Vec<RankedCandidate> {
+pub fn rank_u0_universe(inputs: Vec<UniverseRankingInput>, limit: usize) -> Vec<RankedCandidate> {
     let candidates = inputs
         .into_iter()
         .filter_map(|input| {

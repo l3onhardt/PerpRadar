@@ -10,7 +10,23 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "TONUSDT",
+    "TRXUSDT",
+    "DOTUSDT",
+    "MATICUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+]
 
 
 def price_for(symbol):
@@ -20,10 +36,22 @@ def price_for(symbol):
         "SOLUSDT": 150.0,
         "BNBUSDT": 600.0,
         "XRPUSDT": 0.6,
+        "ADAUSDT": 0.55,
+        "DOGEUSDT": 0.16,
+        "AVAXUSDT": 35.0,
+        "LINKUSDT": 16.0,
+        "TONUSDT": 5.5,
+        "TRXUSDT": 0.12,
+        "DOTUSDT": 7.2,
+        "MATICUSDT": 0.82,
+        "LTCUSDT": 85.0,
+        "BCHUSDT": 420.0,
     }.get(symbol, 100.0)
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -36,6 +64,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/fapi/v1/depth":
             symbol = query.get("symbol", ["BTCUSDT"])[0].upper()
             return self.send_json(depth(symbol))
+        if parsed.path == "/fapi/v1/ticker/24hr":
+            return self.send_json(tickers_24hr())
         if parsed.path == "/fapi/v1/fundingRate":
             return self.send_json([{"fundingRate": "0.0001"} for _ in range(126)])
         if parsed.path.endswith("/stream"):
@@ -67,11 +97,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         streams = parse_qs(parsed.query).get("streams", [""])[0].split("/")
-        for _ in range(3):
-            for payload in ws_payloads(streams):
-                self.wfile.write(websocket_text_frame(json.dumps(payload).encode()))
-                self.wfile.flush()
-                time.sleep(0.05)
+        depth_sequences = {}
+        try:
+            while True:
+                for payload in ws_payloads(streams, depth_sequences):
+                    self.wfile.write(websocket_text_frame(json.dumps(payload).encode()))
+                    self.wfile.flush()
+                    time.sleep(0.05)
+                time.sleep(0.2)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
 
 
 def klines(symbol, limit):
@@ -107,7 +142,19 @@ def depth(symbol):
     }
 
 
-def ws_payloads(streams):
+def tickers_24hr():
+    return [
+        {
+            "symbol": symbol,
+            "lastPrice": f"{price_for(symbol):.8f}",
+            "quoteVolume": str(100_000_000 + idx * 10_000_000),
+            "priceChangePercent": str(1.0 + idx),
+        }
+        for idx, symbol in enumerate(SYMBOLS)
+    ]
+
+
+def ws_payloads(streams, depth_sequences):
     event_time = int(time.time() * 1000)
     for stream in streams:
         if stream == "!ticker@arr":
@@ -182,6 +229,16 @@ def ws_payloads(streams):
         elif "@depth@500ms" in stream:
             symbol = stream.split("@", 1)[0].upper()
             mid = price_for(symbol)
+            previous_u = depth_sequences.get(symbol, 1000)
+            if previous_u == 1000:
+                first_u = 998
+                final_u = 1001
+                previous_final_u = 997
+            else:
+                first_u = previous_u + 1
+                final_u = previous_u + 1
+                previous_final_u = previous_u
+            depth_sequences[symbol] = final_u
             yield {
                 "stream": stream,
                 "data": {
@@ -189,9 +246,9 @@ def ws_payloads(streams):
                     "E": event_time,
                     "T": event_time,
                     "s": symbol,
-                    "U": 998,
-                    "u": 1001,
-                    "pu": 997,
+                    "U": first_u,
+                    "u": final_u,
+                    "pu": previous_final_u,
                     "b": [[f"{mid - 1:.8f}", "12.0"]],
                     "a": [],
                 },
