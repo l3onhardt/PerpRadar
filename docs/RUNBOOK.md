@@ -49,3 +49,7 @@ curl http://127.0.0.1:8080/v1/debug/rate_limits
 ```
 
 Use these endpoints to inspect active/focus symbols, websocket policy, and rate-limit posture during local smoke or VPS validation.
+
+## Handoff
+
+See [HANDOFF.md](HANDOFF.md) for the current V1 branch state, completed 30 minute local long-run result, and VPS acceptance checklist.

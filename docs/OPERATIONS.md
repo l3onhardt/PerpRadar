@@ -42,6 +42,8 @@ V1 keeps all-market mark/ticker/forceOrder as the U0 radar layer, then promotes 
 
 Local validation uses the mock Binance service in compose to verify ClickHouse startup, migrations, API health, packet generation, quality metadata, and recovery behavior without depending on Binance reachability. VPS validation should run the same image with real Binance base URLs from a Binance Futures reachable region and confirm packets refresh continuously for at least two hours.
 
+The current handoff checklist and latest local long-run result are documented in [HANDOFF.md](HANDOFF.md).
+
 ## Lossy Streams And Retries
 
 Runtime ingestion may coalesce high-frequency updates when downstream processing cannot keep up. Coalescing is lossy by design for fast-moving stream state such as book updates, so consumers should rely on latest-state semantics rather than every intermediate event. Retry transient failures with bounded backoff and record degraded packet quality when retries or reconnects leave missing inputs.
