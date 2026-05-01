@@ -28,6 +28,33 @@ fn loads_default_config_contract() -> anyhow::Result<()> {
 }
 
 #[test]
+fn environment_overrides_default_config_values() -> anyhow::Result<()> {
+    let _guard = cwd_lock().lock().expect("cwd lock poisoned");
+    let root = workspace_root();
+    let original = std::env::current_dir()?;
+    std::env::set_current_dir(&root)?;
+    std::env::set_var("PERP_RADAR__API__BIND", "127.0.0.1:19090");
+    std::env::set_var("PERP_RADAR__UNIVERSE__ACTIVE_N", "15");
+    std::env::set_var("PERP_RADAR__UNIVERSE__FOCUS_N", "3");
+    std::env::set_var("PERP_RADAR__BINANCE__REST_BASE", "http://mock-binance:9000");
+
+    let config = AppConfig::from_path("config/default.yaml");
+
+    std::env::remove_var("PERP_RADAR__API__BIND");
+    std::env::remove_var("PERP_RADAR__UNIVERSE__ACTIVE_N");
+    std::env::remove_var("PERP_RADAR__UNIVERSE__FOCUS_N");
+    std::env::remove_var("PERP_RADAR__BINANCE__REST_BASE");
+    std::env::set_current_dir(original)?;
+
+    let config = config?;
+    assert_eq!(config.api.bind, "127.0.0.1:19090");
+    assert_eq!(config.universe.active_n, 15);
+    assert_eq!(config.universe.focus_n, 3);
+    assert_eq!(config.binance.rest_base, "http://mock-binance:9000");
+    Ok(())
+}
+
+#[test]
 fn missing_relative_config_does_not_fall_back_to_checkout_root() -> anyhow::Result<()> {
     let cwd = unique_temp_dir("missing-relative-config")?;
     let result = with_current_dir(&cwd, || AppConfig::from_path("config/default.yaml"));

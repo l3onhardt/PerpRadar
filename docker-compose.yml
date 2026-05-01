@@ -1,0 +1,40 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: perp_radar
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mock-binance:
+    build:
+      context: ./tools/mock-binance
+    ports:
+      - "19000:9000"
+    environment:
+      MOCK_BINANCE_BIND: "0.0.0.0:9000"
+
+  perp-radar:
+    build:
+      context: .
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      mock-binance:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      PERP_RADAR__API__BIND: "0.0.0.0:8080"
+      PERP_RADAR__STORAGE__CLICKHOUSE_URL: "http://clickhouse:8123"
+      PERP_RADAR__BINANCE__REST_BASE: "http://mock-binance:9000"
+      PERP_RADAR__BINANCE__MARKET_WS_BASE: "ws://mock-binance:9000/market"
+      PERP_RADAR__BINANCE__PUBLIC_WS_BASE: "ws://mock-binance:9000/public"
+      PERP_RADAR__UNIVERSE__ACTIVE_N: "15"
+      PERP_RADAR__UNIVERSE__FOCUS_N: "3"

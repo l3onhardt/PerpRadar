@@ -53,6 +53,7 @@ impl AppConfig {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let config = ::config::Config::builder()
             .add_source(::config::File::from(path.as_ref()))
+            .add_source(::config::Environment::with_prefix("PERP_RADAR").separator("__"))
             .build()?;
 
         let config = config.try_deserialize()?;

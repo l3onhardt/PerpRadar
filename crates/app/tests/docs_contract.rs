@@ -20,6 +20,21 @@ fn operations_docs_describe_serving_api_after_startup() {
 }
 
 #[test]
+fn compose_file_wires_app_clickhouse_and_mock_binance() {
+    let compose = std::fs::read_to_string(format!(
+        "{}/../../docker-compose.yml",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+        .unwrap_or_else(|error| panic!("docker-compose.yml should exist: {error}"));
+
+    assert!(compose.contains("clickhouse"));
+    assert!(compose.contains("perp-radar"));
+    assert!(compose.contains("mock-binance"));
+    assert!(compose.contains("PERP_RADAR__BINANCE__REST_BASE"));
+    assert!(compose.contains("PERP_RADAR__STORAGE__CLICKHOUSE_URL"));
+}
+
+#[test]
 fn data_contract_docs_name_packet_schema() {
     let docs = std::fs::read_to_string(format!(
         "{}/../../docs/DATA_CONTRACT.md",

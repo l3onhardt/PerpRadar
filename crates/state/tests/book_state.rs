@@ -155,6 +155,60 @@ fn full_book_rejects_sequence_gap() {
 }
 
 #[test]
+fn full_book_can_recover_after_sequence_gap_with_new_snapshot() {
+    let mut book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    );
+
+    assert!(book
+        .apply_delta(BookDelta {
+            first_update_id: 12,
+            final_update_id: 13,
+            previous_final_update_id: 9,
+            bids: vec![],
+            asks: vec![],
+        })
+        .is_err());
+    assert!(!book.seq_ok());
+
+    book.reset_from_snapshot(
+        20,
+        vec![BookLevel {
+            price: 101.0,
+            qty: 4.0,
+        }],
+        vec![BookLevel {
+            price: 101.1,
+            qty: 5.0,
+        }],
+    );
+    assert!(book
+        .apply_delta(BookDelta {
+            first_update_id: 18,
+            final_update_id: 21,
+            previous_final_update_id: 17,
+            bids: vec![LevelDelta {
+                price: 101.0,
+                qty: 6.0,
+            }],
+            asks: vec![],
+        })
+        .is_ok());
+
+    assert!(book.seq_ok());
+    assert!(book.visible_liquidity_usd(5.0).unwrap() > 1_000.0);
+}
+
+#[test]
 fn full_book_calculates_visible_liquidity_and_slippage() {
     let book = FullBook::from_snapshot(
         "BTCUSDT",

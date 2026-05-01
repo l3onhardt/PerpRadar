@@ -239,7 +239,7 @@ fn standard_packet_includes_market_liquidity_carry_and_event_state() {
     assert!(packet.liquidity.i5.unwrap() > 0.0);
     assert!(packet.liquidity.microprice_bp.unwrap().is_finite());
     assert_eq!(packet.carry.funding_now, Some(0.0001));
-    assert_eq!(packet.carry.funding_unit.as_deref(), Some("8h"));
+    assert_eq!(packet.carry.funding_unit.as_deref(), Some("8h_estimate"));
     assert!(packet.carry.funding_z_7d.is_some());
     assert_eq!(packet.events.liq_1m_usd, Some(200.0));
     assert_eq!(packet.events.liq_15m_usd, Some(200.0));

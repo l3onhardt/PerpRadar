@@ -68,9 +68,21 @@ async fn schema() -> Json<serde_json::Value> {
 
 async fn universe(State(cache): State<PacketCache>) -> Json<serde_json::Value> {
     let packets = cache.top(usize::MAX);
+    let active_symbols = packets
+        .iter()
+        .map(|packet| &packet.symbol)
+        .collect::<Vec<_>>();
+    let focus_symbols = packets
+        .iter()
+        .filter(|packet| packet.quality.book_mode == "full")
+        .map(|packet| &packet.symbol)
+        .collect::<Vec<_>>();
     Json(json!({
         "active_n": packets.len(),
-        "symbols": packets.iter().map(|packet| &packet.symbol).collect::<Vec<_>>()
+        "focus_n": focus_symbols.len(),
+        "symbols": active_symbols,
+        "active_symbols": active_symbols,
+        "focus_symbols": focus_symbols
     }))
 }
 

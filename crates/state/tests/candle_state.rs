@@ -1,3 +1,4 @@
+use perp_radar_core::quality::QualityReason;
 use perp_radar_core::types::Candle;
 use perp_radar_state::book_full::{BookDelta, LevelDelta};
 use perp_radar_state::book_partial::BookLevel;
@@ -194,6 +195,53 @@ fn symbol_state_tracks_mark_ticker_depth_and_liquidations() {
     assert!(state.partial_book.is_some());
     assert_eq!(state.liquidations.len(), 1);
     assert_eq!(state.quality.book_mode, "partial20");
+}
+
+#[test]
+fn symbol_state_marks_market_data_stale_from_event_time() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    state.apply_mark_price(MarkPriceUpdate {
+        symbol: "BTCUSDT".to_string(),
+        mark_price: 100.0,
+        index_price: 99.9,
+        funding_rate: 0.0001,
+        next_funding_time_ms: 1_714_550_400_000,
+        event_time_ms: 1_714_521_600_000,
+    });
+
+    state.age_quality(1_714_521_607_500, 5_000);
+
+    assert_eq!(state.quality.freshness_ms, 7_500);
+    assert!(state.quality.stale);
+    assert!(state
+        .quality
+        .reasons
+        .contains(&QualityReason::StaleMarketData));
+}
+
+#[test]
+fn symbol_state_flags_partial_depth_with_insufficient_coverage() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    state.apply_partial_depth(PartialDepthUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 1,
+        bids: vec![BookLevel {
+            price: 99.99,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 100.01,
+            qty: 10.0,
+        }],
+        event_time_ms: 1_714_521_600_000,
+    });
+
+    assert_eq!(state.quality.book_mode, "partial20");
+    assert!(state.quality.book_depth_coverage_bp.unwrap() < 5.0);
+    assert!(state
+        .quality
+        .reasons
+        .contains(&QualityReason::DepthCoverageLt5Bp));
 }
 
 #[test]

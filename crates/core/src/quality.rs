@@ -46,4 +46,8 @@ impl QualityState {
             self.reasons.push(reason);
         }
     }
+
+    pub fn clear_reason(&mut self, reason: QualityReason) {
+        self.reasons.retain(|existing| *existing != reason);
+    }
 }

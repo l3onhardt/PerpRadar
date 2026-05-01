@@ -15,6 +15,16 @@ pub fn build_standard_packet(
     active_n: usize,
     focus_n: usize,
 ) -> StandardPacket {
+    build_standard_packet_with_funding_interval(state, rank, active_n, focus_n, 8)
+}
+
+pub fn build_standard_packet_with_funding_interval(
+    state: &SymbolState,
+    rank: usize,
+    active_n: usize,
+    focus_n: usize,
+    funding_interval_hours: u32,
+) -> StandardPacket {
     let candles = state.candles_1m.items();
     let last = candles.last();
     let mut quality = state.quality.clone();
@@ -110,8 +120,10 @@ pub fn build_standard_packet(
         },
         carry: CarryBlock {
             funding_now: state.funding_rate,
-            funding_unit: state.funding_rate.map(|_| "8h".to_string()),
-            funding_interval_hours: state.funding_rate.map(|_| 8),
+            funding_unit: state
+                .funding_rate
+                .map(|_| format!("{funding_interval_hours}h_estimate")),
+            funding_interval_hours: state.funding_rate.map(|_| funding_interval_hours),
             funding_z_7d: state
                 .funding_rate
                 .and_then(|rate| crate::funding::z_score(&state.funding_history, rate)),

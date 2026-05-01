@@ -6,7 +6,15 @@ Perp Radar depends on ClickHouse for runtime storage and migrations. Start Click
 
 ## Startup
 
-Default local startup:
+Default local startup with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The compose stack starts ClickHouse, a local mock Binance REST fixture, and Perp Radar with environment overrides. This is the recommended local smoke path because some development networks cannot access Binance Futures directly.
+
+Direct cargo startup remains available when ClickHouse is already running:
 
 ```bash
 cargo run -p perp-radar
@@ -27,6 +35,12 @@ Binance REST calls are budgeted and should be treated as a constrained resource.
 ## Websocket Runtime
 
 Binance websocket connections should be treated as 24h rolling sessions. Plan for reconnects before or after the exchange-enforced session window, and expect stream gaps during reconnects.
+
+V1 keeps all-market mark/ticker/forceOrder as the U0 radar layer, then promotes ranked symbols into the active and focus pools. The default stable local/VPS configuration is `active_n=15` and `focus_n=3`; `always_focus` symbols stay pinned in the active pool even when U0 ranking is volatile.
+
+## Local And VPS Validation
+
+Local validation uses the mock Binance service in compose to verify ClickHouse startup, migrations, API health, packet generation, quality metadata, and recovery behavior without depending on Binance reachability. VPS validation should run the same image with real Binance base URLs from a Binance Futures reachable region and confirm packets refresh continuously for at least two hours.
 
 ## Lossy Streams And Retries
 

@@ -1,0 +1,14 @@
+FROM rust:1.83-slim AS builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release -p perp-radar
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/target/release/perp-radar /usr/local/bin/perp-radar
+COPY config ./config
+EXPOSE 8080
+CMD ["perp-radar"]

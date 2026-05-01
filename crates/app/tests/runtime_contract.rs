@@ -2,6 +2,7 @@ use perp_radar::config::AppConfig;
 use perp_radar::runtime::{
     build_global_market_streams, build_u1_streams, build_u2_streams, build_ws_urls,
     serve_api_listener, start_ingestion_tasks, DepthBootstrapSnapshot, RuntimeEngine,
+    RuntimeEngineConfig,
 };
 use perp_radar_api::cache::PacketCache;
 use perp_radar_core::types::Candle;
@@ -174,6 +175,169 @@ fn runtime_engine_applies_events_and_refreshes_packet_cache() -> anyhow::Result<
 }
 
 #[test]
+fn runtime_engine_promotes_u0_symbols_into_active_and_focus_pools() -> anyhow::Result<()> {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::with_config(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 2,
+            focus_n: 1,
+            stale_after_ms: 5_000,
+            funding_interval_hours: 8,
+        },
+    );
+
+    engine.apply_json(
+        r#"{
+          "stream":"!ticker@arr",
+          "data":[
+            {"e":"24hrTicker","E":1714521601000,"s":"BTCUSDT","c":"100.0","q":"100000000","P":"1.0"},
+            {"e":"24hrTicker","E":1714521601000,"s":"HOTUSDT","c":"50.0","q":"200000000","P":"3.0"},
+            {"e":"24hrTicker","E":1714521601000,"s":"MIDUSDT","c":"20.0","q":"90000000","P":"2.0"}
+          ]
+        }"#,
+    )?;
+    engine.apply_json(
+        r#"{
+          "stream":"!markPrice@arr",
+          "data":[
+            {"e":"markPriceUpdate","E":1714521601000,"s":"BTCUSDT","p":"100.0","i":"99.9","r":"0.0001","T":1714550400000},
+            {"e":"markPriceUpdate","E":1714521601000,"s":"HOTUSDT","p":"50.0","i":"49.9","r":"0.0004","T":1714550400000},
+            {"e":"markPriceUpdate","E":1714521601000,"s":"MIDUSDT","p":"20.0","i":"19.9","r":"0.0001","T":1714550400000}
+          ]
+        }"#,
+    )?;
+    engine.recompute_universe();
+
+    let debug = engine.debug_snapshot();
+    assert_eq!(debug.active_symbols.len(), 2);
+    assert_eq!(debug.focus_symbols, vec!["HOTUSDT"]);
+    assert!(debug.active_symbols.contains(&"BTCUSDT".to_string()));
+    assert!(debug.active_symbols.contains(&"HOTUSDT".to_string()));
+    assert!(cache.get("HOTUSDT").is_some());
+
+    Ok(())
+}
+
+#[test]
+fn runtime_engine_ages_packets_and_debugs_runtime_state() -> anyhow::Result<()> {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::with_config(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 1,
+            focus_n: 1,
+            stale_after_ms: 5_000,
+            funding_interval_hours: 4,
+        },
+    );
+    engine.apply_json(
+        r#"{
+          "stream":"!markPrice@arr",
+          "data":[{
+            "e":"markPriceUpdate",
+            "E":1714521600000,
+            "s":"BTCUSDT",
+            "p":"164.0",
+            "i":"163.5",
+            "r":"0.0001",
+            "T":1714550400000
+          }]
+        }"#,
+    )?;
+
+    engine.age_all(1_714_521_607_500);
+    let packet = cache.get("BTCUSDT").expect("packet is cached");
+    let debug = engine.debug_snapshot();
+
+    assert!(packet.quality.stale);
+    assert_eq!(packet.quality.freshness_ms, 7_500);
+    assert_eq!(packet.carry.funding_interval_hours, Some(4));
+    assert_eq!(debug.packet_count, 1);
+    assert!(debug.stale_symbols.contains(&"BTCUSDT".to_string()));
+
+    Ok(())
+}
+
+#[test]
+fn runtime_engine_marks_full_book_gap_and_recovers_after_snapshot() -> anyhow::Result<()> {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::new(vec!["BTCUSDT".to_string()], cache.clone(), 100);
+    assert!(engine.bootstrap_depth_snapshot(DepthBootstrapSnapshot {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 10,
+        bids: vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    }));
+
+    engine.apply_json(
+        r#"{
+          "stream":"btcusdt@depth@500ms",
+          "data":{
+            "e":"depthUpdate",
+            "E":1714521600000,
+            "T":1714521600000,
+            "s":"BTCUSDT",
+            "U":14,
+            "u":15,
+            "pu":12,
+            "b":[],
+            "a":[]
+          }
+        }"#,
+    )?;
+    let gap_packet = cache.get("BTCUSDT").expect("packet is cached");
+    assert_eq!(gap_packet.quality.book_seq_ok, Some(false));
+    assert_eq!(engine.debug_snapshot().full_book_resync_needed, 1);
+
+    assert!(engine.bootstrap_depth_snapshot(DepthBootstrapSnapshot {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 20,
+        bids: vec![BookLevel {
+            price: 101.0,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 101.1,
+            qty: 6.0,
+        }],
+    }));
+    engine.apply_json(
+        r#"{
+          "stream":"btcusdt@depth@500ms",
+          "data":{
+            "e":"depthUpdate",
+            "E":1714521600000,
+            "T":1714521600000,
+            "s":"BTCUSDT",
+            "U":18,
+            "u":21,
+            "pu":17,
+            "b":[["101.0","12.0"]],
+            "a":[]
+          }
+        }"#,
+    )?;
+
+    let recovered = cache.get("BTCUSDT").expect("packet is cached");
+    assert_eq!(recovered.quality.book_seq_ok, Some(true));
+    assert_eq!(engine.debug_snapshot().full_book_resync_needed, 0);
+    assert!(recovered.liquidity.liq_5bp_usd.unwrap() > 1_000.0);
+
+    Ok(())
+}
+
+#[test]
 fn runtime_engine_bootstraps_closed_rest_klines_into_packet_cache() {
     let cache = PacketCache::default();
     let mut engine = RuntimeEngine::new(vec!["BTCUSDT".to_string()], cache.clone(), 100);
@@ -329,7 +493,7 @@ async fn start_ingestion_tasks_accepts_ws_urls_and_returns_task_handles() -> any
 
     let handles = start_ingestion_tasks(&config, cache, urls.clone());
 
-    assert_eq!(handles.len(), urls.len() + 1);
+    assert_eq!(handles.len(), urls.len() + 2);
     for handle in handles {
         handle.abort();
     }

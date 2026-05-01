@@ -87,6 +87,7 @@ pub struct SymbolState {
     pub full_book: Option<FullBook>,
     pub liquidations: Vec<LiquidationEvent>,
     pub quality: QualityState,
+    last_event_time_ms: Option<i64>,
 }
 
 impl SymbolState {
@@ -106,6 +107,7 @@ impl SymbolState {
             full_book: None,
             liquidations: Vec::new(),
             quality: QualityState::cold("none"),
+            last_event_time_ms: None,
         }
     }
 
@@ -142,9 +144,11 @@ impl SymbolState {
     }
 
     fn mark_kline_accepted(&mut self) {
+        self.last_event_time_ms = self.candles_1m.last().map(|candle| candle.close_time_ms);
         self.quality.warm = self.candles_1m.len() >= 2;
         self.quality.stale = false;
         self.quality.freshness_ms = 0;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
     }
 
     pub fn apply_mark_price(&mut self, update: MarkPriceUpdate) -> bool {
@@ -160,8 +164,10 @@ impl SymbolState {
         self.index_price = Some(update.index_price);
         self.funding_rate = Some(update.funding_rate);
         self.next_funding_time = DateTime::from_timestamp_millis(update.next_funding_time_ms);
+        self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
         true
     }
 
@@ -177,8 +183,10 @@ impl SymbolState {
         self.last_price = Some(update.last_price);
         self.quote_volume_24h = Some(update.quote_volume_24h);
         self.price_change_percent_24h = Some(update.price_change_percent_24h);
+        self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
         true
     }
 
@@ -192,8 +200,15 @@ impl SymbolState {
         self.quality.book_seq_ok = None;
         self.quality.book_depth_coverage_bp =
             self.partial_book.as_ref().and_then(book_depth_coverage_bp);
+        if self.quality.book_depth_coverage_bp.unwrap_or(0.0) < 5.0 {
+            self.quality.add_reason(QualityReason::DepthCoverageLt5Bp);
+        } else {
+            self.quality.clear_reason(QualityReason::DepthCoverageLt5Bp);
+        }
+        self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
         true
     }
 
@@ -212,8 +227,10 @@ impl SymbolState {
             let overflow = self.liquidations.len() - 512;
             self.liquidations.drain(0..overflow);
         }
+        self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
         true
     }
 
@@ -222,20 +239,26 @@ impl SymbolState {
             return false;
         }
 
-        self.full_book = Some(FullBook::from_snapshot(
-            update.symbol,
-            update.last_update_id,
-            update.bids,
-            update.asks,
-        ));
+        if let Some(book) = self.full_book.as_mut() {
+            book.reset_from_snapshot(update.last_update_id, update.bids, update.asks);
+        } else {
+            self.full_book = Some(FullBook::from_snapshot(
+                update.symbol,
+                update.last_update_id,
+                update.bids,
+                update.asks,
+            ));
+        }
         self.quality.book_mode = "full".to_string();
         self.quality.book_seq_ok = Some(true);
         self.quality.book_depth_coverage_bp = self
             .full_book
             .as_ref()
             .and_then(|book| book.visible_liquidity_usd(10.0).map(|_| 10.0));
+        self.quality.clear_reason(QualityReason::FullBookSequenceGap);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
         true
     }
 
@@ -253,6 +276,8 @@ impl SymbolState {
                 self.quality.book_seq_ok = Some(true);
                 self.quality.freshness_ms = 0;
                 self.quality.stale = false;
+                self.quality.clear_reason(QualityReason::FullBookSequenceGap);
+                self.quality.clear_reason(QualityReason::StaleMarketData);
                 true
             }
             Err(_) => {
@@ -271,6 +296,34 @@ impl SymbolState {
         self.funding_history = rates;
         self.quality.funding_history_points = self.funding_history.len();
         true
+    }
+
+    pub fn age_quality(&mut self, now_ms: i64, stale_after_ms: u64) {
+        let Some(last_event_time_ms) = self.last_event_time_ms else {
+            self.quality.freshness_ms = u64::MAX;
+            self.quality.stale = true;
+            self.quality.add_reason(QualityReason::StaleMarketData);
+            return;
+        };
+        let freshness = now_ms.saturating_sub(last_event_time_ms).max(0) as u64;
+        self.quality.freshness_ms = freshness;
+        if freshness > stale_after_ms {
+            self.quality.stale = true;
+            self.quality.add_reason(QualityReason::StaleMarketData);
+        } else {
+            self.quality.stale = false;
+            self.quality.clear_reason(QualityReason::StaleMarketData);
+        }
+    }
+
+    pub fn ret_15m(&self) -> Option<f64> {
+        let candles = self.candles_1m.items();
+        let end = candles.last()?.close;
+        let start = candles.get(candles.len().checked_sub(16)?)?.close;
+        if !start.is_finite() || !end.is_finite() || start == 0.0 {
+            return None;
+        }
+        Some((end - start) / start)
     }
 }
 

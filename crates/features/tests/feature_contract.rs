@@ -1,7 +1,9 @@
 use perp_radar_core::types::Candle;
 use perp_radar_features::funding::z_score;
 use perp_radar_features::liquidity::liquidity_quality;
-use perp_radar_features::ranking::{rank_candidates, Candidate};
+use perp_radar_features::ranking::{
+    rank_candidates, rank_u0_universe, Candidate, UniverseRankingInput,
+};
 use perp_radar_features::scores::{composite_candidate_score, ScoreInputs};
 use perp_radar_features::ta::{return_pct, simple_rsi, technical_snapshot};
 
@@ -163,6 +165,78 @@ fn ranking_excludes_non_finite_scores() {
     assert_eq!(ranked[0].rank, 1);
     assert_eq!(ranked[1].symbol, "ETHUSDT");
     assert_eq!(ranked[1].rank, 2);
+}
+
+#[test]
+fn u0_ranking_combines_liquidity_stress_liquidations_and_momentum() {
+    let ranked = rank_u0_universe(
+        vec![
+            UniverseRankingInput {
+                symbol: "SLOWUSDT".to_string(),
+                quote_volume_24h: Some(80_000_000.0),
+                price_change_percent_24h: Some(0.2),
+                funding_rate: Some(0.0001),
+                liquidation_5m_usd: Some(0.0),
+                ret_15m: Some(0.001),
+            },
+            UniverseRankingInput {
+                symbol: "HOTUSDT".to_string(),
+                quote_volume_24h: Some(120_000_000.0),
+                price_change_percent_24h: Some(1.8),
+                funding_rate: Some(0.00035),
+                liquidation_5m_usd: Some(1_500_000.0),
+                ret_15m: Some(0.021),
+            },
+            UniverseRankingInput {
+                symbol: "BROKENUSDT".to_string(),
+                quote_volume_24h: Some(f64::NAN),
+                price_change_percent_24h: Some(9.9),
+                funding_rate: Some(0.001),
+                liquidation_5m_usd: Some(10_000_000.0),
+                ret_15m: Some(0.2),
+            },
+        ],
+        2,
+    );
+
+    assert_eq!(ranked.len(), 2);
+    assert_eq!(ranked[0].symbol, "HOTUSDT");
+    assert_eq!(ranked[0].rank, 1);
+    assert!(ranked[0].score > ranked[1].score);
+    assert_eq!(ranked[1].symbol, "SLOWUSDT");
+}
+
+#[test]
+fn u0_ranking_keeps_order_stable_with_alphabetic_tiebreak() {
+    let ranked = rank_u0_universe(
+        vec![
+            UniverseRankingInput {
+                symbol: "ETHUSDT".to_string(),
+                quote_volume_24h: Some(100_000_000.0),
+                price_change_percent_24h: Some(1.0),
+                funding_rate: Some(0.0001),
+                liquidation_5m_usd: Some(0.0),
+                ret_15m: None,
+            },
+            UniverseRankingInput {
+                symbol: "BTCUSDT".to_string(),
+                quote_volume_24h: Some(100_000_000.0),
+                price_change_percent_24h: Some(1.0),
+                funding_rate: Some(0.0001),
+                liquidation_5m_usd: Some(0.0),
+                ret_15m: None,
+            },
+        ],
+        2,
+    );
+
+    assert_eq!(
+        ranked
+            .into_iter()
+            .map(|candidate| candidate.symbol)
+            .collect::<Vec<_>>(),
+        vec!["BTCUSDT", "ETHUSDT"]
+    );
 }
 
 #[test]

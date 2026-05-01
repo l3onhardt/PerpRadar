@@ -52,6 +52,19 @@ impl FullBook {
         }
     }
 
+    pub fn reset_from_snapshot(
+        &mut self,
+        last_update_id: u64,
+        bids: Vec<BookLevel>,
+        asks: Vec<BookLevel>,
+    ) {
+        self.last_update_id = last_update_id;
+        self.seq_ok = true;
+        self.bootstrapped = false;
+        self.bids = levels_to_map(bids);
+        self.asks = levels_to_map(asks);
+    }
+
     pub fn apply_delta(&mut self, delta: BookDelta) -> Result<(), FullBookError> {
         let sequence_ok = if self.bootstrapped {
             delta.previous_final_update_id == self.last_update_id

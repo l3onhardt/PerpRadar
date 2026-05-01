@@ -2,7 +2,7 @@ use perp_radar_binance::rate_limiter::TokenBucket;
 use perp_radar_binance::rest_client::{
     parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json, RestClient,
 };
-use perp_radar_binance::ws_client::stream_text_messages;
+use perp_radar_binance::ws_client::{stream_text_messages, ReconnectPolicy};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -116,6 +116,21 @@ async fn token_bucket_try_take_zero_does_not_consume_tokens() {
     assert!(bucket.try_take(0));
     assert!(bucket.try_take(1));
     assert!(!bucket.try_take(1));
+}
+
+#[test]
+fn reconnect_policy_uses_bounded_exponential_backoff() {
+    let policy = ReconnectPolicy {
+        initial_delay_ms: 500,
+        max_delay_ms: 5_000,
+        session_rollover_secs: 82_800,
+    };
+
+    assert_eq!(policy.delay_for_attempt(0).as_millis(), 500);
+    assert_eq!(policy.delay_for_attempt(1).as_millis(), 1_000);
+    assert_eq!(policy.delay_for_attempt(4).as_millis(), 5_000);
+    assert_eq!(policy.delay_for_attempt(20).as_millis(), 5_000);
+    assert_eq!(policy.session_rollover_secs, 82_800);
 }
 
 #[tokio::test]

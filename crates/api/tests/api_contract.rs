@@ -212,6 +212,47 @@ async fn top_packets_are_ranked_by_rank_then_symbol_and_truncated() {
 }
 
 #[tokio::test]
+async fn universe_route_exposes_active_and_focus_symbols() {
+    let mut full = packet_with("BTCUSDT", 1);
+    full.quality.book_mode = "full".to_string();
+    let app = app_with(vec![full, packet_with("ETHUSDT", 2)]);
+
+    let response = get_from(app, "/v1/universe").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["active_n"], 2);
+    assert_eq!(json["focus_n"], 1);
+    assert_eq!(json["active_symbols"][0], "BTCUSDT");
+    assert_eq!(json["focus_symbols"][0], "BTCUSDT");
+}
+
+#[tokio::test]
+async fn debug_routes_report_runtime_policies() {
+    let ws = get("/v1/debug/ws").await;
+    assert_eq!(ws.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(ws.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "runtime_managed");
+    assert_eq!(json["reconnect_policy"], "bounded_backoff");
+
+    let limits = get("/v1/debug/rate_limits").await;
+    assert_eq!(limits.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(limits.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["control_messages_per_second"], 10);
+    assert_eq!(json["queue_mode"], "coalesce_lossy_streams");
+}
+
+#[tokio::test]
 async fn export_limit_zero_returns_empty_response() {
     let response = get("/v1/export/top.jsonl?limit=0").await;
 

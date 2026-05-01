@@ -29,6 +29,10 @@ impl PacketCache {
         packets
     }
 
+    pub fn len(&self) -> usize {
+        self.read_packets().len()
+    }
+
     fn read_packets(&self) -> RwLockReadGuard<'_, HashMap<String, StandardPacket>> {
         self.packets
             .read()

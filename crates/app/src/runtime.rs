@@ -10,7 +10,8 @@ use perp_radar_binance::rest_client::{
 use perp_radar_binance::streams::{combined_stream_url, WsBase};
 use perp_radar_binance::ws_client::stream_text_messages;
 use perp_radar_core::types::Candle;
-use perp_radar_features::packet_builder::build_standard_packet;
+use perp_radar_features::packet_builder::build_standard_packet_with_funding_interval;
+use perp_radar_features::ranking::{rank_u0_universe, UniverseRankingInput};
 use perp_radar_state::book_partial::BookLevel;
 use perp_radar_state::symbol_state::{
     ForceOrderUpdate, FullDepthDeltaUpdate, FullDepthSnapshotUpdate, KlineUpdate, MarkPriceUpdate,
@@ -103,6 +104,29 @@ pub struct RuntimeEngine {
     cache: PacketCache,
     active_n: usize,
     focus_n: usize,
+    pinned_symbols: Vec<String>,
+    active_symbols: Vec<String>,
+    focus_symbols: Vec<String>,
+    stale_after_ms: u64,
+    funding_interval_hours: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeEngineConfig {
+    pub candle_capacity: usize,
+    pub active_n: usize,
+    pub focus_n: usize,
+    pub stale_after_ms: u64,
+    pub funding_interval_hours: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeDebugSnapshot {
+    pub active_symbols: Vec<String>,
+    pub focus_symbols: Vec<String>,
+    pub stale_symbols: Vec<String>,
+    pub packet_count: usize,
+    pub full_book_resync_needed: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -117,13 +141,36 @@ impl RuntimeEngine {
     pub fn new(symbols: Vec<String>, cache: PacketCache, candle_capacity: usize) -> Self {
         let active_n = symbols.len();
         let focus_n = symbols.len();
+        Self::with_config(
+            symbols,
+            cache,
+            RuntimeEngineConfig {
+                candle_capacity,
+                active_n,
+                focus_n,
+                stale_after_ms: 15_000,
+                funding_interval_hours: 8,
+            },
+        )
+    }
+
+    pub fn with_config(
+        symbols: Vec<String>,
+        cache: PacketCache,
+        config: RuntimeEngineConfig,
+    ) -> Self {
+        let active_n = config.active_n;
+        let focus_n = config.focus_n;
+        let pinned_symbols = canonical_symbols(symbols.clone(), active_n);
+        let active_symbols = canonical_symbols(symbols.clone(), active_n);
+        let focus_symbols = canonical_symbols(symbols.clone(), focus_n);
         let states = symbols
             .into_iter()
             .map(|symbol| {
                 let canonical = symbol.to_ascii_uppercase();
                 (
                     canonical.clone(),
-                    SymbolState::new(canonical, candle_capacity),
+                    SymbolState::new(canonical, config.candle_capacity),
                 )
             })
             .collect();
@@ -133,6 +180,11 @@ impl RuntimeEngine {
             cache,
             active_n,
             focus_n,
+            pinned_symbols,
+            active_symbols,
+            focus_symbols,
+            stale_after_ms: config.stale_after_ms,
+            funding_interval_hours: config.funding_interval_hours,
         }
     }
 
@@ -169,6 +221,7 @@ impl RuntimeEngine {
             BinanceEvent::MarkPrices(events) => {
                 for event in events {
                     let symbol = event.symbol.clone();
+                    self.ensure_state(&symbol);
                     if let Some(state) = self.states.get_mut(&symbol) {
                         if state.apply_mark_price(MarkPriceUpdate {
                             symbol: event.symbol,
@@ -186,6 +239,7 @@ impl RuntimeEngine {
             BinanceEvent::Tickers(events) => {
                 for event in events {
                     let symbol = event.symbol.clone();
+                    self.ensure_state(&symbol);
                     if let Some(state) = self.states.get_mut(&symbol) {
                         if state.apply_ticker(TickerUpdate {
                             symbol: event.symbol,
@@ -201,6 +255,7 @@ impl RuntimeEngine {
             }
             BinanceEvent::ForceOrder(event) => {
                 let symbol = event.symbol.clone();
+                self.ensure_state(&symbol);
                 if let Some(state) = self.states.get_mut(&symbol) {
                     if state.apply_force_order(ForceOrderUpdate {
                         symbol: event.symbol,
@@ -230,6 +285,7 @@ impl RuntimeEngine {
 
     pub fn bootstrap_klines(&mut self, symbol: &str, candles: Vec<Candle>) -> usize {
         let symbol = symbol.to_ascii_uppercase();
+        self.ensure_state(&symbol);
         let Some(state) = self.states.get_mut(&symbol) else {
             return 0;
         };
@@ -248,6 +304,7 @@ impl RuntimeEngine {
 
     pub fn bootstrap_depth_snapshot(&mut self, snapshot: DepthBootstrapSnapshot) -> bool {
         let symbol = snapshot.symbol.to_ascii_uppercase();
+        self.ensure_state(&symbol);
         let Some(state) = self.states.get_mut(&symbol) else {
             return false;
         };
@@ -266,6 +323,7 @@ impl RuntimeEngine {
 
     pub fn bootstrap_funding_history(&mut self, symbol: &str, rates: Vec<f64>) -> bool {
         let symbol = symbol.to_ascii_uppercase();
+        self.ensure_state(&symbol);
         let Some(state) = self.states.get_mut(&symbol) else {
             return false;
         };
@@ -276,12 +334,131 @@ impl RuntimeEngine {
         accepted
     }
 
-    fn refresh_symbol(&self, symbol: &str) {
-        if let Some(state) = self.states.get(symbol) {
-            self.cache
-                .upsert(build_standard_packet(state, 1, self.active_n, self.focus_n));
+    pub fn recompute_universe(&mut self) {
+        let ranked = rank_u0_universe(
+            self.states
+                .values()
+                .map(|state| UniverseRankingInput {
+                    symbol: state.symbol.clone(),
+                    quote_volume_24h: state.quote_volume_24h,
+                    price_change_percent_24h: state.price_change_percent_24h,
+                    funding_rate: state.funding_rate,
+                    liquidation_5m_usd: liquidation_total_for_universe(state, 300_000),
+                    ret_15m: state.ret_15m(),
+                })
+                .collect(),
+            self.active_n,
+        );
+        let mut active_symbols = Vec::new();
+        for symbol in &self.pinned_symbols {
+            if active_symbols.len() >= self.active_n {
+                break;
+            }
+            if !active_symbols.contains(symbol) {
+                active_symbols.push(symbol.clone());
+            }
+        }
+        for candidate in &ranked {
+            if active_symbols.len() >= self.active_n {
+                break;
+            }
+            if !active_symbols.contains(&candidate.symbol) {
+                active_symbols.push(candidate.symbol.clone());
+            }
+        }
+        self.active_symbols = active_symbols;
+        self.focus_symbols = ranked
+            .into_iter()
+            .take(self.focus_n)
+            .map(|candidate| candidate.symbol)
+            .collect();
+        let symbols = self.active_symbols.clone();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            self.refresh_symbol_with_rank(symbol, idx + 1);
         }
     }
+
+    pub fn age_all(&mut self, now_ms: i64) {
+        let symbols = self.states.keys().cloned().collect::<Vec<_>>();
+        for symbol in symbols {
+            if let Some(state) = self.states.get_mut(&symbol) {
+                state.age_quality(now_ms, self.stale_after_ms);
+            }
+            self.refresh_symbol(&symbol);
+        }
+    }
+
+    pub fn debug_snapshot(&self) -> RuntimeDebugSnapshot {
+        RuntimeDebugSnapshot {
+            active_symbols: self.active_symbols.clone(),
+            focus_symbols: self.focus_symbols.clone(),
+            stale_symbols: self
+                .states
+                .values()
+                .filter(|state| state.quality.stale)
+                .map(|state| state.symbol.clone())
+                .collect(),
+            packet_count: self.cache.len(),
+            full_book_resync_needed: self
+                .states
+                .values()
+                .filter(|state| state.quality.book_seq_ok == Some(false))
+                .count(),
+        }
+    }
+
+    fn ensure_state(&mut self, symbol: &str) {
+        let symbol = symbol.to_ascii_uppercase();
+        self.states
+            .entry(symbol.clone())
+            .or_insert_with(|| SymbolState::new(symbol, 1500));
+    }
+
+    fn refresh_symbol(&self, symbol: &str) {
+        let rank = self
+            .active_symbols
+            .iter()
+            .position(|active| active == symbol)
+            .map(|idx| idx + 1)
+            .unwrap_or(1);
+        self.refresh_symbol_with_rank(symbol, rank);
+    }
+
+    fn refresh_symbol_with_rank(&self, symbol: &str, rank: usize) {
+        if let Some(state) = self.states.get(symbol) {
+            self.cache.upsert(build_standard_packet_with_funding_interval(
+                state,
+                rank,
+                self.active_n,
+                self.focus_n,
+                self.funding_interval_hours,
+            ));
+        }
+    }
+}
+
+fn canonical_symbols(symbols: Vec<String>, limit: usize) -> Vec<String> {
+    symbols
+        .into_iter()
+        .map(|symbol| symbol.to_ascii_uppercase())
+        .take(limit)
+        .collect()
+}
+
+fn liquidation_total_for_universe(state: &SymbolState, window_ms: i64) -> Option<f64> {
+    let latest = state
+        .liquidations
+        .iter()
+        .map(|event| event.event_time_ms)
+        .max()?;
+    Some(
+        state
+            .liquidations
+            .iter()
+            .filter(|event| latest - event.event_time_ms <= window_ms)
+            .map(|event| event.notional_usd)
+            .sum(),
+    )
 }
 
 pub fn start_ingestion_tasks(
@@ -291,7 +468,17 @@ pub fn start_ingestion_tasks(
 ) -> Vec<JoinHandle<()>> {
     let (tx, mut rx) = mpsc::channel::<String>(4096);
     let symbols = config.universe.always_focus.clone();
-    let mut engine = RuntimeEngine::new(symbols, cache, 1500);
+    let mut engine = RuntimeEngine::with_config(
+        symbols,
+        cache,
+        RuntimeEngineConfig {
+            candle_capacity: 1500,
+            active_n: config.universe.active_n,
+            focus_n: config.universe.focus_n,
+            stale_after_ms: config.packets.standard_interval_ms.saturating_mul(15),
+            funding_interval_hours: 8,
+        },
+    );
 
     let bootstrap_config = config.clone();
     let bootstrap_handle = tokio::spawn(async move {
@@ -312,6 +499,14 @@ pub fn start_ingestion_tasks(
             if let Err(error) = engine.apply_json(&payload) {
                 tracing::warn!(%error, "failed to apply Binance event");
             }
+            engine.recompute_universe();
+        }
+    });
+
+    let health_handle = tokio::spawn(async move {
+        loop {
+            tracing::debug!("runtime health tick");
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
     });
 
@@ -330,6 +525,7 @@ pub fn start_ingestion_tasks(
         })
         .collect::<Vec<_>>();
     handles.push(bootstrap_handle);
+    handles.push(health_handle);
     handles
 }
 
