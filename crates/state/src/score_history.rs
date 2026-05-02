@@ -244,6 +244,9 @@ fn robust_z(window: &RingWindow, current: f64, min_samples: usize, z_clip: f64) 
     if scale == 0.0 {
         scale = sample_stddev(&values)?;
     }
+    if scale == 0.0 && (current - median_value).abs() == 0.0 {
+        return Some(0.0);
+    }
     if scale == 0.0 || !scale.is_finite() {
         return None;
     }

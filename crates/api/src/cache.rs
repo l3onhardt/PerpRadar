@@ -14,6 +14,15 @@ impl PacketCache {
         self.write_packets().insert(packet.symbol.clone(), packet);
     }
 
+    pub fn retain_symbols<'a>(&self, symbols: impl IntoIterator<Item = &'a String>) {
+        let allowed = symbols
+            .into_iter()
+            .map(|symbol| canonical_symbol(symbol))
+            .collect::<std::collections::HashSet<_>>();
+        self.write_packets()
+            .retain(|symbol, _| allowed.contains(symbol));
+    }
+
     pub fn get(&self, symbol: &str) -> Option<StandardPacket> {
         self.read_packets().get(&canonical_symbol(symbol)).cloned()
     }

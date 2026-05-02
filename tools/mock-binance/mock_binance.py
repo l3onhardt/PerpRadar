@@ -28,6 +28,9 @@ SYMBOLS = [
     "BCHUSDT",
 ]
 
+DEPTH_SEQUENCE_LOCK = threading.Lock()
+DEPTH_SEQUENCES = {symbol: 1000 for symbol in SYMBOLS}
+
 
 def price_for(symbol):
     return {
@@ -135,8 +138,10 @@ def klines(symbol, limit):
 
 def depth(symbol):
     mid = price_for(symbol)
+    with DEPTH_SEQUENCE_LOCK:
+        last_update_id = DEPTH_SEQUENCES.setdefault(symbol, 1000)
     return {
-        "lastUpdateId": 1000,
+        "lastUpdateId": last_update_id,
         "bids": [[f"{mid - 1 - idx:.8f}", "10.0"] for idx in range(20)],
         "asks": [[f"{mid + 1 + idx:.8f}", "10.0"] for idx in range(20)],
     }
@@ -221,6 +226,8 @@ def ws_payloads(streams, depth_sequences):
             yield {
                 "stream": stream,
                 "data": {
+                    "E": event_time,
+                    "s": symbol,
                     "lastUpdateId": book["lastUpdateId"],
                     "bids": book["bids"][:20],
                     "asks": book["asks"][:20],
@@ -229,16 +236,13 @@ def ws_payloads(streams, depth_sequences):
         elif "@depth@500ms" in stream:
             symbol = stream.split("@", 1)[0].upper()
             mid = price_for(symbol)
-            previous_u = depth_sequences.get(symbol, 1000)
-            if previous_u == 1000:
-                first_u = 998
-                final_u = 1001
-                previous_final_u = 997
-            else:
+            with DEPTH_SEQUENCE_LOCK:
+                previous_u = max(depth_sequences.get(symbol, 1000), DEPTH_SEQUENCES.setdefault(symbol, 1000))
                 first_u = previous_u + 1
                 final_u = previous_u + 1
                 previous_final_u = previous_u
-            depth_sequences[symbol] = final_u
+                depth_sequences[symbol] = final_u
+                DEPTH_SEQUENCES[symbol] = final_u
             yield {
                 "stream": stream,
                 "data": {

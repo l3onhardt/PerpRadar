@@ -116,24 +116,37 @@ fn chart_block(
 }
 
 fn liquidity_block(state: &SymbolState) -> LiquidityBlock {
+    let trusted_full_book = trusted_full_book(state);
+
     LiquidityBlock {
         book_mode: state.quality.book_mode.clone(),
-        spread_bp: state
-            .partial_book
-            .as_ref()
-            .and_then(|book| book.spread_bp()),
-        i1: state
-            .partial_book
-            .as_ref()
-            .and_then(|book| book.imbalance_top_n(1)),
-        i5: state
-            .partial_book
-            .as_ref()
-            .and_then(|book| book.imbalance_top_n(5)),
-        microprice_bp: state
-            .partial_book
-            .as_ref()
-            .and_then(|book| book.microprice_bp()),
+        spread_bp: trusted_full_book
+            .and_then(|book| book.spread_bp())
+            .or_else(|| state.partial_book.as_ref().and_then(|book| book.spread_bp())),
+        i1: trusted_full_book
+            .and_then(|book| book.notional_imbalance_top_n(1))
+            .or_else(|| {
+                state
+                    .partial_book
+                    .as_ref()
+                    .and_then(|book| book.imbalance_top_n(1))
+            }),
+        i5: trusted_full_book
+            .and_then(|book| book.notional_imbalance_top_n(5))
+            .or_else(|| {
+                state
+                    .partial_book
+                    .as_ref()
+                    .and_then(|book| book.imbalance_top_n(5))
+            }),
+        microprice_bp: trusted_full_book
+            .and_then(|book| book.microprice_bp())
+            .or_else(|| {
+                state
+                    .partial_book
+                    .as_ref()
+                    .and_then(|book| book.microprice_bp())
+            }),
         liq_5bp_usd: state
             .full_book
             .as_ref()
@@ -151,6 +164,17 @@ fn liquidity_block(state: &SymbolState) -> LiquidityBlock {
             .as_ref()
             .and_then(|book| book.slippage_bp_for_notional(10_000.0, false)),
     }
+}
+
+fn legacy_top5_imbalance(state: &SymbolState) -> Option<f64> {
+    trusted_full_book(state)
+        .and_then(|book| book.notional_imbalance_top_n(5))
+        .or_else(|| {
+            state
+                .partial_book
+                .as_ref()
+                .and_then(|book| book.imbalance_top_n(5))
+        })
 }
 
 fn carry_block(state: &SymbolState, funding_interval_hours: u32) -> CarryBlock {
@@ -362,10 +386,7 @@ fn legacy_scores_block(state: &SymbolState, candles: &[Candle]) -> LegacyScoresB
         compression_score: components.compression_score,
         momentum_abs_score: components.momentum_abs_score,
         volume_spike_z: components.volume_spike_z,
-        notional_imbalance_i5: state
-            .partial_book
-            .as_ref()
-            .and_then(|book| book.imbalance_top_n(5)),
+        notional_imbalance_i5: legacy_top5_imbalance(state),
     }
 }
 
@@ -822,6 +843,13 @@ fn robust_component(
     let mut scale = 1.4826 * mad;
     if scale == 0.0 {
         scale = sample_stddev(&values)?;
+    }
+    if scale == 0.0 && (current - median_value).abs() == 0.0 {
+        return Some(ComponentStats {
+            n: values.len(),
+            median: median_value,
+            z: 0.0,
+        });
     }
     if scale == 0.0 || !scale.is_finite() {
         return None;

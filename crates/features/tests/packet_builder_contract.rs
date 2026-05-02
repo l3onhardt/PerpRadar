@@ -395,6 +395,48 @@ fn packet_builder_uses_full_book_qty_imbalance_for_dpi5_and_dpi10() {
 }
 
 #[test]
+fn standard_packet_uses_trusted_full_book_for_top_liquidity_when_partial_book_missing() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    state.apply_full_depth_snapshot(FullDepthSnapshotUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 123,
+        bids: (0..10)
+            .map(|idx| BookLevel {
+                price: 100.0 - idx as f64 * 0.01,
+                qty: 10.0,
+            })
+            .collect(),
+        asks: (0..10)
+            .map(|idx| BookLevel {
+                price: 100.1 + idx as f64 * 0.01,
+                qty: 5.0,
+            })
+            .collect(),
+    });
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(packet.liquidity.book_mode, "full");
+    assert!(packet.liquidity.spread_bp.unwrap() > 0.0);
+    let expected_i1 = (100.0 * 10.0 - 100.1 * 5.0) / (100.0 * 10.0 + 100.1 * 5.0);
+    let expected_i5 = ((0..5)
+        .map(|idx| (100.0 - idx as f64 * 0.01) * 10.0)
+        .sum::<f64>()
+        - (0..5)
+            .map(|idx| (100.1 + idx as f64 * 0.01) * 5.0)
+            .sum::<f64>())
+        / ((0..5)
+            .map(|idx| (100.0 - idx as f64 * 0.01) * 10.0)
+            .sum::<f64>()
+            + (0..5)
+                .map(|idx| (100.1 + idx as f64 * 0.01) * 5.0)
+                .sum::<f64>());
+    assert!((packet.liquidity.i1.unwrap() - expected_i1).abs() < 1e-12);
+    assert!((packet.liquidity.i5.unwrap() - expected_i5).abs() < 1e-12);
+    assert!(packet.liquidity.microprice_bp.unwrap().is_finite());
+}
+
+#[test]
 fn packet_builder_computes_lri_from_full_book_history_not_liquidations() {
     let mut state = SymbolState::new("BTCUSDT", 240);
     for idx in 0..80 {

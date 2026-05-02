@@ -154,6 +154,47 @@ impl FullBook {
         })
     }
 
+    pub fn notional_imbalance_top_n(&self, n: usize) -> Option<f64> {
+        if n == 0 || self.bids.len() < n || self.asks.len() < n {
+            return None;
+        }
+
+        let bid_notional = self
+            .bids
+            .iter()
+            .rev()
+            .take(n)
+            .map(|(price, qty)| key_to_price(*price) * *qty)
+            .sum::<f64>();
+        let ask_notional = self
+            .asks
+            .iter()
+            .take(n)
+            .map(|(price, qty)| key_to_price(*price) * *qty)
+            .sum::<f64>();
+        let total = bid_notional + ask_notional;
+        if !total.is_finite() || total <= 0.0 {
+            return None;
+        }
+
+        Some((bid_notional - ask_notional) / total)
+    }
+
+    pub fn microprice_bp(&self) -> Option<f64> {
+        let bid_price = self.best_bid()?;
+        let ask_price = self.best_ask()?;
+        let bid_qty = *self.bids.get(&price_key(bid_price))?;
+        let ask_qty = *self.asks.get(&price_key(ask_price))?;
+        let mid = (bid_price + ask_price) / 2.0;
+        let total_qty = bid_qty + ask_qty;
+        if !mid.is_finite() || mid <= 0.0 || !total_qty.is_finite() || total_qty <= 0.0 {
+            return None;
+        }
+
+        let microprice = (ask_price * bid_qty + bid_price * ask_qty) / total_qty;
+        Some((microprice - mid) / mid * 10_000.0)
+    }
+
     pub fn visible_liquidity_usd(&self, max_distance_bp: f64) -> Option<f64> {
         if !max_distance_bp.is_finite() || max_distance_bp < 0.0 {
             return None;

@@ -398,13 +398,20 @@ impl SymbolState {
         let funding_z_7d = self
             .funding_rate
             .and_then(|rate| funding_z_score(&self.funding_history, rate));
+        let i1 = if self.trusted_full_book() {
+            self.full_book
+                .as_ref()
+                .and_then(|book| book.notional_imbalance_top_n(1))
+        } else {
+            self.partial_book
+                .as_ref()
+                .and_then(|book| book.imbalance_top_n(1))
+        };
         self.score_history.record_rpi_components(
             simple_rsi(&closes, 14),
             funding_z_7d,
             tail_return(&candles, 60),
-            self.partial_book
-                .as_ref()
-                .and_then(|book| book.imbalance_top_n(1)),
+            i1,
         );
     }
 }

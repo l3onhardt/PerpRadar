@@ -218,6 +218,38 @@ fn runtime_engine_promotes_u0_symbols_into_active_and_focus_pools() -> anyhow::R
     assert!(debug.active_symbols.contains(&"BTCUSDT".to_string()));
     assert!(debug.active_symbols.contains(&"HOTUSDT".to_string()));
     assert!(cache.get("HOTUSDT").is_some());
+    assert!(cache.get("MIDUSDT").is_none());
+
+    Ok(())
+}
+
+#[test]
+fn runtime_engine_does_not_cache_non_active_global_ticker_symbols() -> anyhow::Result<()> {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::with_config(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 1,
+            focus_n: 1,
+            stale_after_ms: 5_000,
+            funding_interval_hours: 8,
+        },
+    );
+
+    engine.apply_json(
+        r#"{
+          "stream":"!ticker@arr",
+          "data":[
+            {"e":"24hrTicker","E":1714521601000,"s":"BTCUSDT","c":"100.0","q":"100000000","P":"1.0"},
+            {"e":"24hrTicker","E":1714521601000,"s":"COLDUSDT","c":"50.0","q":"200000000","P":"3.0"}
+          ]
+        }"#,
+    )?;
+
+    assert!(cache.get("BTCUSDT").is_some());
+    assert!(cache.get("COLDUSDT").is_none());
 
     Ok(())
 }

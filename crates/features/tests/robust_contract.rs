@@ -37,7 +37,20 @@ fn robust_stats_falls_back_to_stddev_when_mad_is_zero() {
 }
 
 #[test]
-fn robust_stats_returns_none_when_all_history_values_are_equal() {
+fn robust_stats_returns_zero_when_all_history_values_equal_current() {
+    let mut window = RingWindow::new(5);
+    for _ in 0..5 {
+        window.push(1.0);
+    }
+
+    let stats = window.stats(1.0, 5, 5.0).unwrap();
+
+    assert_eq!(stats.scale, 0.0);
+    assert_eq!(stats.z, 0.0);
+}
+
+#[test]
+fn robust_stats_returns_none_when_all_history_values_equal_but_current_differs() {
     let mut window = RingWindow::new(5);
     for _ in 0..5 {
         window.push(1.0);

@@ -191,13 +191,12 @@ impl RuntimeEngine {
         }
     }
 
-    pub fn apply_json(&mut self, payload: &str) -> Result<()> {
+    pub fn apply_json(&mut self, payload: &str) -> Result<bool> {
         let event = parse_combined_event(payload)?;
-        self.apply_event(event);
-        Ok(())
+        Ok(self.apply_event(event))
     }
 
-    pub fn apply_event(&mut self, event: BinanceEvent) {
+    pub fn apply_event(&mut self, event: BinanceEvent) -> bool {
         match event {
             BinanceEvent::Kline(event) => {
                 let symbol = event.update.candle.symbol.clone();
@@ -206,6 +205,7 @@ impl RuntimeEngine {
                         self.refresh_symbol(&symbol);
                     }
                 }
+                false
             }
             BinanceEvent::PartialDepth(event) => {
                 let symbol = event.symbol.clone();
@@ -220,6 +220,7 @@ impl RuntimeEngine {
                         self.refresh_symbol(&symbol);
                     }
                 }
+                false
             }
             BinanceEvent::MarkPrices(events) => {
                 for event in events {
@@ -234,10 +235,13 @@ impl RuntimeEngine {
                             next_funding_time_ms: event.next_funding_time_ms,
                             event_time_ms: event.event_time_ms,
                         }) {
-                            self.refresh_symbol(&symbol);
+                            if self.active_symbols.contains(&symbol) {
+                                self.refresh_symbol(&symbol);
+                            }
                         }
                     }
                 }
+                false
             }
             BinanceEvent::Tickers(events) => {
                 for event in events {
@@ -251,10 +255,13 @@ impl RuntimeEngine {
                             price_change_percent_24h: event.price_change_percent_24h,
                             event_time_ms: event.event_time_ms,
                         }) {
-                            self.refresh_symbol(&symbol);
+                            if self.active_symbols.contains(&symbol) {
+                                self.refresh_symbol(&symbol);
+                            }
                         }
                     }
                 }
+                true
             }
             BinanceEvent::ForceOrder(event) => {
                 let symbol = event.symbol.clone();
@@ -268,9 +275,12 @@ impl RuntimeEngine {
                         event_time_ms: event.event_time_ms,
                         order_time_ms: event.order_time_ms,
                     }) {
-                        self.refresh_symbol(&symbol);
+                        if self.active_symbols.contains(&symbol) {
+                            self.refresh_symbol(&symbol);
+                        }
                     }
                 }
+                true
             }
             BinanceEvent::Depth(event) => {
                 let symbol = event.symbol.clone();
@@ -282,8 +292,9 @@ impl RuntimeEngine {
                     });
                     self.refresh_symbol(&symbol);
                 }
+                false
             }
-            BinanceEvent::Ignored => {}
+            BinanceEvent::Ignored => false,
         }
     }
 
@@ -404,6 +415,7 @@ impl RuntimeEngine {
             .take(self.focus_n)
             .map(|candidate| candidate.symbol)
             .collect();
+        self.cache.retain_symbols(self.active_symbols.iter());
         let symbols = self.active_symbols.clone();
         for (idx, symbol) in symbols.iter().enumerate() {
             self.refresh_symbol_with_rank(symbol, idx + 1);
@@ -411,7 +423,7 @@ impl RuntimeEngine {
     }
 
     pub fn age_all(&mut self, now_ms: i64) {
-        let symbols = self.states.keys().cloned().collect::<Vec<_>>();
+        let symbols = self.active_symbols.clone();
         for symbol in symbols {
             if let Some(state) = self.states.get_mut(&symbol) {
                 state.age_quality(now_ms, self.stale_after_ms);
@@ -554,10 +566,11 @@ pub fn start_ingestion_tasks(
                     let Some(payload) = maybe_payload else {
                         break;
                     };
-                    if let Err(error) = engine.apply_json(&payload) {
-                        tracing::warn!(%error, "failed to apply Binance event");
+                    match engine.apply_json(&payload) {
+                        Ok(true) => engine.recompute_universe(),
+                        Ok(false) => {}
+                        Err(error) => tracing::warn!(%error, "failed to apply Binance event"),
                     }
-                    engine.recompute_universe();
                     if engine.debug_snapshot().full_book_resync_needed > 0 {
                         if let Err(error) = resync_focus_depths(&bootstrap_config, &mut engine, 1000).await
                         {
