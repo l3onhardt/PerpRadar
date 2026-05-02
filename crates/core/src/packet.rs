@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -37,10 +39,16 @@ pub struct ChartBlock {
     pub signature: Option<String>,
     pub ema_20: Option<f64>,
     pub ema_50: Option<f64>,
+    pub ema_200: Option<f64>,
+    pub ema50_slope: Option<f64>,
     pub rsi_14: Option<f64>,
     pub macd_histogram: Option<f64>,
     pub atr_pct: Option<f64>,
+    pub atr_1h_pct: Option<f64>,
+    pub atr_1h_pct_prev: Option<f64>,
+    pub atr_1h_pct_delta_ratio: Option<f64>,
     pub bb_width: Option<f64>,
+    pub bb_width_pctile: Option<f64>,
     pub adx_14: Option<f64>,
     pub vwap_20: Option<f64>,
     pub cmf_20: Option<f64>,
@@ -85,12 +93,45 @@ pub struct ScoresBlock {
     pub lri: Option<f64>,
     #[serde(rename = "DPI5")]
     pub dpi5: Option<f64>,
+    #[serde(rename = "DPI10")]
+    pub dpi10: Option<f64>,
     #[serde(rename = "CSI")]
     pub csi: Option<f64>,
     #[serde(rename = "RPI")]
     pub rpi: Option<f64>,
     #[serde(rename = "VoV")]
     pub vov: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ScoreMeta {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub book_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slip_notional_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z: Option<f64>,
+    #[serde(default)]
+    pub components: serde_json::Value,
+    #[serde(default)]
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LegacyScoresBlock {
+    pub candidate_score: Option<f64>,
+    pub liquidation_event_score: Option<f64>,
+    pub compression_score: Option<f64>,
+    pub momentum_abs_score: Option<f64>,
+    pub volume_spike_z: Option<f64>,
+    pub notional_imbalance_i5: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,5 +148,7 @@ pub struct StandardPacket {
     pub carry: CarryBlock,
     pub events: EventsBlock,
     pub scores: ScoresBlock,
+    pub score_meta: BTreeMap<String, ScoreMeta>,
+    pub legacy_scores: LegacyScoresBlock,
     pub quality: QualityState,
 }

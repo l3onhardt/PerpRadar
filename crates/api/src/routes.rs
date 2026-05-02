@@ -50,7 +50,7 @@ async fn health() -> Json<HealthResponse> {
 
 async fn schema() -> Json<serde_json::Value> {
     Json(json!({
-        "packet_schema": "2.0",
+        "packet_schema": "2.1",
         "routes": [
             "/v1/health",
             "/v1/schema",

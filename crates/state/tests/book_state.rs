@@ -287,3 +287,109 @@ fn full_book_calculates_visible_liquidity_and_slippage() {
     assert!(book.slippage_bp_for_notional(1_000.0, true).unwrap() > 0.0);
     assert!(book.slippage_bp_for_notional(1_000.0, false).unwrap() > 0.0);
 }
+
+#[test]
+fn full_book_calculates_spread_bp_from_top_of_book() {
+    let book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    );
+
+    let expected = (100.1 - 100.0) / 100.05 * 10_000.0;
+
+    assert!((book.spread_bp().unwrap() - expected).abs() < 0.0001);
+}
+
+#[test]
+fn full_book_calculates_qty_imbalance_top_n_for_dpi() {
+    let book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![
+            BookLevel {
+                price: 100.0,
+                qty: 10.0,
+            },
+            BookLevel {
+                price: 99.9,
+                qty: 5.0,
+            },
+            BookLevel {
+                price: 99.8,
+                qty: 1.0,
+            },
+        ],
+        vec![
+            BookLevel {
+                price: 100.1,
+                qty: 6.0,
+            },
+            BookLevel {
+                price: 100.2,
+                qty: 2.0,
+            },
+            BookLevel {
+                price: 100.3,
+                qty: 2.0,
+            },
+        ],
+    );
+
+    let dpi2 = book.qty_imbalance_top_n(2).unwrap();
+
+    assert_eq!(dpi2.bid_qty_top_n, 15.0);
+    assert_eq!(dpi2.ask_qty_top_n, 8.0);
+    assert_eq!(dpi2.all_qty_top_n, 23.0);
+    assert!((dpi2.imbalance - ((15.0 - 8.0) / 23.0)).abs() < 0.0001);
+}
+
+#[test]
+fn full_book_qty_imbalance_is_none_when_depth_is_insufficient_or_zero() {
+    let shallow = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    );
+    let zero = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![
+            BookLevel {
+                price: 100.0,
+                qty: 0.0,
+            },
+            BookLevel {
+                price: 99.9,
+                qty: 0.0,
+            },
+        ],
+        vec![
+            BookLevel {
+                price: 100.1,
+                qty: 0.0,
+            },
+            BookLevel {
+                price: 100.2,
+                qty: 0.0,
+            },
+        ],
+    );
+
+    assert_eq!(shallow.qty_imbalance_top_n(2), None);
+    assert_eq!(zero.qty_imbalance_top_n(2), None);
+}

@@ -53,7 +53,7 @@ fn standard_packet_uses_symbol_price_and_quality_from_state() {
     let packet = build_standard_packet(&state, 1, 15, 3);
 
     assert_eq!(packet.symbol, "BTCUSDT");
-    assert_eq!(packet.packet_schema, "2.0");
+    assert_eq!(packet.packet_schema, "2.1");
     assert_eq!(packet.profile, PacketProfile::Standard);
     assert_eq!(packet.universe.tier, UniverseTier::U2);
     assert_eq!(packet.universe.active_n, 15);
@@ -62,6 +62,12 @@ fn standard_packet_uses_symbol_price_and_quality_from_state() {
     assert!(packet.price.ret_5m.is_none());
     assert_eq!(packet.chart.signature, Some("1m:DOJI".to_string()));
     assert_eq!(packet.liquidity.book_mode, "none");
+    assert!(packet.scores.lri.is_none());
+    assert!(packet.scores.dpi10.is_none());
+    assert!(packet.score_meta.contains_key("LRI"));
+    assert!(packet.score_meta["LRI"]
+        .missing
+        .contains(&"book_not_full".to_string()));
     assert!(!packet.quality.reasons.is_empty());
     assert!(packet
         .quality
@@ -245,7 +251,7 @@ fn standard_packet_includes_market_liquidity_carry_and_event_state() {
     assert_eq!(packet.events.liq_15m_usd, Some(200.0));
     assert_eq!(packet.events.liq_side.as_deref(), Some("long"));
     assert!(packet.events.volume_spike_z.is_some());
-    assert!(packet.scores.tcs.is_some());
+    assert!(packet.legacy_scores.candidate_score.is_some());
 }
 
 #[test]
@@ -298,7 +304,204 @@ fn standard_packet_tcs_remains_available_without_recent_liquidations() {
 
     assert_eq!(packet.events.liq_5m_usd, None);
     assert_eq!(packet.scores.lri, None);
-    assert!(packet.scores.tcs.is_some());
+    assert_eq!(packet.scores.tcs, None);
+    assert!(packet.legacy_scores.candidate_score.is_some());
+}
+
+#[test]
+fn packet_builder_moves_old_score_meanings_to_legacy_scores() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    for idx in 0..64 {
+        let close = 100.0 + idx as f64;
+        state.apply_kline(KlineUpdate {
+            candle: Candle {
+                symbol: "BTCUSDT".to_string(),
+                open_time_ms: 1_700_000_000_000 + (idx as i64 * 60_000),
+                close_time_ms: 1_700_000_059_999 + (idx as i64 * 60_000),
+                open: close - 0.5,
+                high: close + 1.0,
+                low: close - 1.0,
+                close,
+                volume_base: 100.0 + idx as f64,
+                volume_quote: (100.0 + idx as f64) * close,
+                trades: 100 + idx as u64,
+                taker_buy_base: (100.0 + idx as f64) * 0.5,
+                taker_buy_quote: (100.0 + idx as f64) * close * 0.5,
+                is_closed: true,
+                source: "test".to_string(),
+            },
+        });
+    }
+    state.apply_mark_price(MarkPriceUpdate {
+        symbol: "BTCUSDT".to_string(),
+        mark_price: 164.0,
+        index_price: 163.5,
+        funding_rate: 0.0001,
+        next_funding_time_ms: 1_714_550_400_000,
+        event_time_ms: 1_714_521_600_000,
+    });
+    state.apply_partial_depth(PartialDepthUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 42,
+        bids: vec![BookLevel {
+            price: 163.9,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 164.1,
+            qty: 8.0,
+        }],
+        event_time_ms: 1_714_521_602_000,
+    });
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(packet.scores.tcs, None);
+    assert!(packet.legacy_scores.candidate_score.is_some());
+    assert_eq!(packet.legacy_scores.notional_imbalance_i5, packet.liquidity.i5);
+    assert_eq!(
+        packet.legacy_scores.volume_spike_z,
+        packet.events.volume_spike_z
+    );
+}
+
+#[test]
+fn packet_builder_uses_full_book_qty_imbalance_for_dpi5_and_dpi10() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    state.apply_full_depth_snapshot(FullDepthSnapshotUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 123,
+        bids: (0..10)
+            .map(|idx| BookLevel {
+                price: 100.0 - idx as f64 * 0.01,
+                qty: 10.0,
+            })
+            .collect(),
+        asks: (0..10)
+            .map(|idx| BookLevel {
+                price: 100.1 + idx as f64 * 0.01,
+                qty: 5.0,
+            })
+            .collect(),
+    });
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(packet.scores.dpi5, Some((50.0 - 25.0) / 75.0));
+    assert_eq!(packet.scores.dpi10, Some((100.0 - 50.0) / 150.0));
+    assert_eq!(packet.score_meta["DPI5"].book_source.as_deref(), Some("full"));
+    assert!(packet.score_meta["DPI5"].missing.is_empty());
+    assert!(packet.score_meta["DPI10"].missing.is_empty());
+}
+
+#[test]
+fn packet_builder_computes_lri_from_full_book_history_not_liquidations() {
+    let mut state = SymbolState::new("BTCUSDT", 240);
+    for idx in 0..80 {
+        state.apply_full_depth_snapshot(FullDepthSnapshotUpdate {
+            symbol: "BTCUSDT".to_string(),
+            last_update_id: 1_000 + idx as u64,
+            bids: vec![
+                BookLevel {
+                    price: 100.0,
+                    qty: 40.0 + idx as f64,
+                },
+                BookLevel {
+                    price: 99.99,
+                    qty: 40.0 + idx as f64,
+                },
+            ],
+            asks: vec![
+                BookLevel {
+                    price: 100.01,
+                    qty: 35.0 + idx as f64,
+                },
+                BookLevel {
+                    price: 100.02,
+                    qty: 35.0 + idx as f64,
+                },
+            ],
+        });
+    }
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert!(packet.events.liq_5m_usd.is_none());
+    assert!(packet.scores.lri.is_some());
+    assert!(packet.score_meta["LRI"].available);
+    assert!(packet.score_meta["LRI"].missing.is_empty());
+    assert_eq!(
+        packet.score_meta["LRI"].direction.as_deref(),
+        Some(
+            "higher means stronger observed liquidity / lower immediate execution friction under the defined formula"
+        )
+    );
+}
+
+#[test]
+fn packet_builder_computes_csi_rpi_vov_from_formal_inputs() {
+    let mut state = SymbolState::new("BTCUSDT", 260);
+    state.apply_funding_history("BTCUSDT", vec![-0.0002, -0.0001, 0.0, 0.0001, 0.0002]);
+    for idx in 0..90 {
+        let oscillation = ((idx % 10) as f64 - 5.0) * 0.6;
+        let close = 100.0 + idx as f64 * 0.25 + oscillation;
+        state.apply_kline(KlineUpdate {
+            candle: Candle {
+                symbol: "BTCUSDT".to_string(),
+                open_time_ms: 1_700_000_000_000 + (idx as i64 * 60_000),
+                close_time_ms: 1_700_000_059_999 + (idx as i64 * 60_000),
+                open: close - 0.6,
+                high: close + 1.4 + (idx % 5) as f64 * 0.05,
+                low: close - 1.1,
+                close,
+                volume_base: 100.0 + idx as f64,
+                volume_quote: (100.0 + idx as f64) * close,
+                trades: 100 + idx as u64,
+                taker_buy_base: (100.0 + idx as f64) * 0.6,
+                taker_buy_quote: (100.0 + idx as f64) * close * 0.6,
+                is_closed: true,
+                source: "test".to_string(),
+            },
+        });
+        let mark = close * (1.0 + (idx as f64 - 45.0) / 100_000.0);
+        state.apply_mark_price(MarkPriceUpdate {
+            symbol: "BTCUSDT".to_string(),
+            mark_price: mark,
+            index_price: close,
+            funding_rate: ((idx as f64 - 45.0) / 45.0) * 0.0002,
+            next_funding_time_ms: 1_714_550_400_000,
+            event_time_ms: 1_714_521_600_000 + idx as i64 * 60_000,
+        });
+        state.apply_partial_depth(PartialDepthUpdate {
+            symbol: "BTCUSDT".to_string(),
+            last_update_id: 42 + idx as u64,
+            bids: vec![BookLevel {
+                price: 100.0,
+                qty: if idx % 3 == 0 { 2.0 } else { 10.0 },
+            }],
+            asks: vec![BookLevel {
+                price: 100.1,
+                qty: if idx % 3 == 0 { 10.0 } else { 2.0 },
+            }],
+            event_time_ms: 1_714_521_602_000 + idx as i64 * 60_000,
+        });
+    }
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert!(packet.scores.csi.is_some());
+    assert!(packet.scores.rpi.is_some());
+    assert!(packet.scores.vov.is_some());
+    assert!(packet.score_meta["CSI"].available);
+    assert!(packet.score_meta["RPI"].available);
+    assert!(packet.score_meta["VoV"].available);
+    assert!(packet.score_meta["CSI"].missing.is_empty());
+    assert!(packet.score_meta["RPI"].missing.is_empty());
+    assert!(packet.score_meta["VoV"].missing.is_empty());
+    assert_eq!(
+        packet.legacy_scores.volume_spike_z,
+        packet.events.volume_spike_z
+    );
 }
 
 #[test]

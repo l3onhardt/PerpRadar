@@ -4,8 +4,8 @@ use chrono::{TimeZone, Utc};
 use perp_radar_api::cache::PacketCache;
 use perp_radar_api::routes::router;
 use perp_radar_core::packet::{
-    CarryBlock, ChartBlock, EventsBlock, LiquidityBlock, PacketProfile, PriceBlock, ScoresBlock,
-    StandardPacket, UniverseBlock,
+    CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
+    PriceBlock, ScoresBlock, StandardPacket, UniverseBlock,
 };
 use perp_radar_core::quality::QualityState;
 use perp_radar_core::types::UniverseTier;
@@ -17,7 +17,7 @@ fn fixture_packet() -> StandardPacket {
 
 fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
     StandardPacket {
-        packet_schema: "2.0".to_string(),
+        packet_schema: "2.1".to_string(),
         ts: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
         symbol: symbol.to_string(),
         rank,
@@ -74,10 +74,13 @@ fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
             tcs: Some(0.81),
             lri: Some(0.22),
             dpi5: Some(0.33),
+            dpi10: Some(0.34),
             csi: Some(0.44),
             rpi: Some(0.55),
             vov: Some(1.42),
         },
+        score_meta: std::collections::BTreeMap::new(),
+        legacy_scores: LegacyScoresBlock::default(),
         quality: QualityState {
             freshness_ms: 384,
             warm: true,

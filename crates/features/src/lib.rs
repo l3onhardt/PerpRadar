@@ -2,6 +2,7 @@ pub mod funding;
 pub mod liquidity;
 pub mod packet_builder;
 pub mod ranking;
+pub mod robust;
 pub mod scores;
 pub mod ta;
 

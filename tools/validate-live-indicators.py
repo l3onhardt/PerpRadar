@@ -39,6 +39,7 @@ REQUIRED_PACKET_PATHS = [
     ("events.volume_spike_z", lambda p: p["events"]["volume_spike_z"]),
     ("scores.TCS", lambda p: p["scores"]["TCS"]),
     ("scores.DPI5", lambda p: p["scores"]["DPI5"]),
+    ("scores.DPI10", lambda p: p["scores"]["DPI10"]),
     ("scores.CSI", lambda p: p["scores"]["CSI"]),
     ("scores.RPI", lambda p: p["scores"]["RPI"]),
     ("scores.VoV", lambda p: p["scores"]["VoV"]),
@@ -66,6 +67,11 @@ def missing_fields(packet):
 def validate_packet(packet):
     quality = packet["quality"]
     problems = []
+    if packet.get("packet_schema") == "2.1":
+        if not isinstance(packet.get("score_meta"), dict):
+            problems.append("score_meta_missing")
+        if not isinstance(packet.get("legacy_scores"), dict):
+            problems.append("legacy_scores_missing")
     if quality["stale"]:
         problems.append("quality.stale=true")
     if quality["freshness_ms"] > 15_000:

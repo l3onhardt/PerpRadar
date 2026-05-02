@@ -64,6 +64,9 @@ def packet_summary(packet):
         "tcs": packet["scores"]["TCS"],
         "lri": packet["scores"]["LRI"],
         "dpi5": packet["scores"]["DPI5"],
+        "dpi10": packet["scores"].get("DPI10"),
+        "score_meta": packet.get("score_meta", {}),
+        "legacy_scores": packet.get("legacy_scores", {}),
     }
 
 
@@ -85,7 +88,8 @@ def sample():
             problems.append(f"{packet['symbol']}:book_mode={packet['book_mode']}")
         if packet["book_seq_ok"] is not True:
             problems.append(f"{packet['symbol']}:book_seq_ok={packet['book_seq_ok']}")
-        if packet["lri"] is None:
+        lri_meta = packet.get("score_meta", {}).get("LRI", {})
+        if packet["lri"] is None and not lri_meta.get("missing"):
             problems.append(f"{packet['symbol']}:lri_unavailable")
     return {
         "ts": utc_now(),

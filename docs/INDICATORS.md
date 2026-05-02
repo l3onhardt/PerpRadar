@@ -1,6 +1,6 @@
 # Indicators
 
-Perp Radar V1 exposes explainable packet-facing features. These fields are intended to support ranking, alerting, and LLM summaries without hiding the source of each signal.
+Perp Radar exposes explainable packet-facing features and Packet 2.1 formal indicators. These fields are intended to support ranking, alerting, audit, and LLM summaries without hiding the source of each value.
 
 ## Price And Returns
 
@@ -30,4 +30,29 @@ Liquidation features describe liquidation pressure and side when available. Even
 
 ## Null And Reason Behavior
 
-Packet fields may be `null` when their source stream, REST input, or prerequisite state is unavailable. A null indicator is not zero or neutral. Consumers should read the packet quality metadata and reason list to explain missing indicators instead of inventing values.
+Packet fields may be `null` when their source stream, REST input, bounded history, or prerequisite state is unavailable. A null indicator is not zero or neutral. Consumers should read `quality.reasons` and `score_meta.<score>.missing` to explain missing indicators instead of inventing values.
+
+## Packet 2.1 Scores
+
+Formal `scores` contains `LRI`, `TCS`, `DPI5`, `DPI10`, `CSI`, `RPI`, and `VoV`. Packet output does not convert these indicators into trade instructions.
+
+Packet 2.1 keeps prior score meanings under `legacy_scores` during migration:
+
+- `candidate_score`
+- `liquidation_event_score`
+- `compression_score`
+- `momentum_abs_score`
+- `volume_spike_z`
+- `notional_imbalance_i5`
+
+`DPI5` and `DPI10` are quantity imbalance indicators from trusted full-book top levels. If full-book state is unavailable or sequence quality is not trusted, these formal scores are `null` and `score_meta` explains why.
+
+The remaining formal scores are computed from bounded in-memory history:
+
+- `LRI` uses trusted full-book spread, visible liquidity within 5 bp, and max buy/sell slippage for the configured notional.
+- `TCS` uses ADX14, trend sign versus EMA200, EMA50 slope, and bounded Bollinger width percentile.
+- `CSI` uses absolute funding z and absolute basis.
+- `RPI` uses RSI extreme, same-side funding pressure, and book pressure against the 1h move.
+- `VoV` uses ATR percent delta ratio, not volume spike.
+
+If a score is unavailable because the bounded window is still warming, the packet keeps the score `null` and reports a concrete `score_meta.<score>.missing` reason.

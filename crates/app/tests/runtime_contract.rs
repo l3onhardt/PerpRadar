@@ -168,7 +168,8 @@ fn runtime_engine_applies_events_and_refreshes_packet_cache() -> anyhow::Result<
     assert!(packet.liquidity.spread_bp.is_some());
     assert_eq!(packet.carry.funding_now, Some(0.0001));
     assert_eq!(packet.events.liq_1m_usd, Some(400.0));
-    assert!(packet.scores.tcs.is_some());
+    assert_eq!(packet.scores.tcs, None);
+    assert!(packet.legacy_scores.candidate_score.is_some());
     assert!(packet.quality.warm);
 
     Ok(())

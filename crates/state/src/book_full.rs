@@ -25,6 +25,14 @@ pub struct BookDelta {
     pub asks: Vec<LevelDelta>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DepthQtyImbalance {
+    pub bid_qty_top_n: f64,
+    pub ask_qty_top_n: f64,
+    pub all_qty_top_n: f64,
+    pub imbalance: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct FullBook {
     symbol: String,
@@ -108,6 +116,42 @@ impl FullBook {
 
     pub fn mid(&self) -> Option<f64> {
         Some((self.best_bid()? + self.best_ask()?) / 2.0)
+    }
+
+    pub fn spread_bp(&self) -> Option<f64> {
+        let bid = self.best_bid()?;
+        let ask = self.best_ask()?;
+        let mid = (bid + ask) / 2.0;
+        if !mid.is_finite() || mid <= 0.0 {
+            return None;
+        }
+        Some((ask - bid) / mid * 10_000.0)
+    }
+
+    pub fn qty_imbalance_top_n(&self, n: usize) -> Option<DepthQtyImbalance> {
+        if n == 0 || self.bids.len() < n || self.asks.len() < n {
+            return None;
+        }
+
+        let bid_qty_top_n = self
+            .bids
+            .iter()
+            .rev()
+            .take(n)
+            .map(|(_, qty)| *qty)
+            .sum::<f64>();
+        let ask_qty_top_n = self.asks.iter().take(n).map(|(_, qty)| *qty).sum::<f64>();
+        let all_qty_top_n = bid_qty_top_n + ask_qty_top_n;
+        if !all_qty_top_n.is_finite() || all_qty_top_n <= 0.0 {
+            return None;
+        }
+
+        Some(DepthQtyImbalance {
+            bid_qty_top_n,
+            ask_qty_top_n,
+            all_qty_top_n,
+            imbalance: (bid_qty_top_n - ask_qty_top_n) / all_qty_top_n,
+        })
     }
 
     pub fn visible_liquidity_usd(&self, max_distance_bp: f64) -> Option<f64> {

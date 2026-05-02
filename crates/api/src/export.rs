@@ -13,7 +13,7 @@ chart:regime={regime},rsi14={rsi},atr_pct={atr},bb_width={bb},adx14={adx},macd_h
 liquidity:book={book},spread_bp={spread},liq_5bp_usd={liq5},liq_10bp_usd={liq10} \
 carry:funding_now={funding},unit={funding_unit},z_7d={funding_z} \
 events:liq_1m_usd={liq1},liq_5m_usd={liq5m},liq_15m_usd={liq15m},side={liq_side},volume_spike_z={volume_spike} \
-scores:TCS={tcs},LRI={lri},DPI5={dpi5},CSI={csi},RPI={rpi},VoV={vov} \
+scores:TCS={tcs},LRI={lri},DPI5={dpi5},DPI10={dpi10},CSI={csi},RPI={rpi},VoV={vov} \
 quality:warm={warm},stale={stale},freshness_ms={freshness},reasons={reasons:?}",
         symbol = packet.symbol,
         rank = packet.rank,
@@ -42,6 +42,7 @@ quality:warm={warm},stale={stale},freshness_ms={freshness},reasons={reasons:?}",
         tcs = fmt_opt(packet.scores.tcs),
         lri = fmt_opt(packet.scores.lri),
         dpi5 = fmt_opt(packet.scores.dpi5),
+        dpi10 = fmt_opt(packet.scores.dpi10),
         csi = fmt_opt(packet.scores.csi),
         rpi = fmt_opt(packet.scores.rpi),
         vov = fmt_opt(packet.scores.vov),

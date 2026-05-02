@@ -9,3 +9,4 @@ chrono.workspace = true
 perp-radar-core = { path = "../core" }
 perp-radar-state = { path = "../state" }
 serde.workspace = true
+serde_json.workspace = true
