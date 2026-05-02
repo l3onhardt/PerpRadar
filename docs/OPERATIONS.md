@@ -17,13 +17,13 @@ The compose stack starts ClickHouse, a local mock Binance REST fixture, and Perp
 Direct cargo startup remains available when ClickHouse is already running:
 
 ```bash
-cargo run -p perp-radar
+PERP_RADAR__API__BIND=127.0.0.1:18080 cargo run -p perp-radar
 ```
 
 After startup succeeds, run:
 
 ```bash
-curl http://127.0.0.1:8080/v1/health
+curl http://127.0.0.1:18080/v1/health
 ```
 
 Use this API check to confirm the HTTP runtime is serving requests.

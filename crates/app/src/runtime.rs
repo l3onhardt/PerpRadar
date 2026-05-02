@@ -5,10 +5,12 @@ use anyhow::{Context, Result};
 use perp_radar_api::{cache::PacketCache, routes};
 use perp_radar_binance::parser::{parse_combined_event, BinanceEvent};
 use perp_radar_binance::rest_client::{
-    parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json, RestClient,
+    parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json,
+    parse_premium_index_json, RestClient,
 };
 use perp_radar_binance::streams::{combined_stream_url, WsBase};
 use perp_radar_binance::ws_client::stream_text_messages;
+use perp_radar_core::time::now_utc;
 use perp_radar_core::types::Candle;
 use perp_radar_features::packet_builder::build_standard_packet_with_funding_interval;
 use perp_radar_features::ranking::{rank_u0_universe, UniverseRankingInput};
@@ -20,6 +22,7 @@ use perp_radar_state::symbol_state::{
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::{interval, MissedTickBehavior};
 use url::Url;
 
 use crate::config::AppConfig;
@@ -212,7 +215,7 @@ impl RuntimeEngine {
                         last_update_id: event.last_update_id,
                         bids: event.bids,
                         asks: event.asks,
-                        event_time_ms: 0,
+                        event_time_ms: event.event_time_ms,
                     }) {
                         self.refresh_symbol(&symbol);
                     }
@@ -274,6 +277,7 @@ impl RuntimeEngine {
                 if let Some(state) = self.states.get_mut(&symbol) {
                     state.apply_full_depth_delta(FullDepthDeltaUpdate {
                         symbol: symbol.clone(),
+                        event_time_ms: event.event_time_ms,
                         delta: event.into(),
                     });
                     self.refresh_symbol(&symbol);
@@ -334,6 +338,34 @@ impl RuntimeEngine {
         accepted
     }
 
+    pub fn bootstrap_premium_index(
+        &mut self,
+        symbol: &str,
+        mark_price: f64,
+        index_price: f64,
+        funding_rate: f64,
+        next_funding_time_ms: i64,
+        event_time_ms: i64,
+    ) -> bool {
+        let symbol = symbol.to_ascii_uppercase();
+        self.ensure_state(&symbol);
+        let Some(state) = self.states.get_mut(&symbol) else {
+            return false;
+        };
+        let accepted = state.apply_mark_price(MarkPriceUpdate {
+            symbol: symbol.clone(),
+            mark_price,
+            index_price,
+            funding_rate,
+            next_funding_time_ms,
+            event_time_ms,
+        });
+        if accepted {
+            self.refresh_symbol(&symbol);
+        }
+        accepted
+    }
+
     pub fn recompute_universe(&mut self) {
         let ranked = rank_u0_universe(
             self.states
@@ -384,7 +416,7 @@ impl RuntimeEngine {
             if let Some(state) = self.states.get_mut(&symbol) {
                 state.age_quality(now_ms, self.stale_after_ms);
             }
-            self.refresh_symbol(&symbol);
+            self.refresh_symbol_at(&symbol, now_ms);
         }
     }
 
@@ -415,25 +447,38 @@ impl RuntimeEngine {
     }
 
     fn refresh_symbol(&self, symbol: &str) {
+        self.refresh_symbol_at(symbol, now_utc().timestamp_millis());
+    }
+
+    fn refresh_symbol_at(&self, symbol: &str, now_ms: i64) {
         let rank = self
             .active_symbols
             .iter()
             .position(|active| active == symbol)
             .map(|idx| idx + 1)
             .unwrap_or(1);
-        self.refresh_symbol_with_rank(symbol, rank);
+        self.refresh_symbol_with_rank_at(symbol, rank, now_ms);
     }
 
     fn refresh_symbol_with_rank(&self, symbol: &str, rank: usize) {
+        self.refresh_symbol_with_rank_at(symbol, rank, now_utc().timestamp_millis());
+    }
+
+    fn refresh_symbol_with_rank_at(&self, symbol: &str, rank: usize, now_ms: i64) {
         if let Some(state) = self.states.get(symbol) {
-            self.cache
-                .upsert(build_standard_packet_with_funding_interval(
-                    state,
-                    rank,
-                    self.active_n,
-                    self.focus_n,
-                    self.funding_interval_hours,
-                ));
+            let mut packet = build_standard_packet_with_funding_interval(
+                state,
+                rank,
+                self.active_n,
+                self.focus_n,
+                self.funding_interval_hours,
+            );
+            packet.quality = state.quality_with_freshness(
+                packet.quality,
+                now_ms,
+                self.stale_after_ms,
+            );
+            self.cache.upsert(packet);
         }
     }
 }
@@ -495,12 +540,35 @@ pub fn start_ingestion_tasks(
             Ok(accepted) => tracing::info!(accepted, "bootstrapped focus funding histories"),
             Err(error) => tracing::warn!(%error, "focus funding history bootstrap failed"),
         }
+        match bootstrap_focus_premium_index(&bootstrap_config, &mut engine).await {
+            Ok(accepted) => tracing::info!(accepted, "bootstrapped focus premium indexes"),
+            Err(error) => tracing::warn!(%error, "focus premium index bootstrap failed"),
+        }
 
-        while let Some(payload) = rx.recv().await {
-            if let Err(error) = engine.apply_json(&payload) {
-                tracing::warn!(%error, "failed to apply Binance event");
+        let mut age_tick = interval(std::time::Duration::from_secs(1));
+        age_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                maybe_payload = rx.recv() => {
+                    let Some(payload) = maybe_payload else {
+                        break;
+                    };
+                    if let Err(error) = engine.apply_json(&payload) {
+                        tracing::warn!(%error, "failed to apply Binance event");
+                    }
+                    engine.recompute_universe();
+                    if engine.debug_snapshot().full_book_resync_needed > 0 {
+                        if let Err(error) = resync_focus_depths(&bootstrap_config, &mut engine, 1000).await
+                        {
+                            tracing::warn!(%error, "focus depth resync failed");
+                        }
+                    }
+                }
+                _ = age_tick.tick() => {
+                    engine.age_all(now_utc().timestamp_millis());
+                }
             }
-            engine.recompute_universe();
         }
     });
 
@@ -594,6 +662,41 @@ pub async fn bootstrap_focus_funding_history(
         }
     }
     Ok(accepted)
+}
+
+pub async fn bootstrap_focus_premium_index(
+    config: &AppConfig,
+    engine: &mut RuntimeEngine,
+) -> Result<usize> {
+    let client = RestClient::new(&config.binance.rest_base)?;
+    let mut accepted = 0;
+    for symbol in &config.universe.always_focus {
+        let json = client
+            .premium_index_json(symbol)
+            .await
+            .with_context(|| format!("bootstrap premium index for {symbol}"))?;
+        let premium = parse_premium_index_json(json)
+            .with_context(|| format!("parse bootstrap premium index for {symbol}"))?;
+        if engine.bootstrap_premium_index(
+            &premium.symbol,
+            premium.mark_price,
+            premium.index_price,
+            premium.funding_rate,
+            premium.next_funding_time_ms,
+            premium.event_time_ms,
+        ) {
+            accepted += 1;
+        }
+    }
+    Ok(accepted)
+}
+
+async fn resync_focus_depths(
+    config: &AppConfig,
+    engine: &mut RuntimeEngine,
+    limit: u16,
+) -> Result<usize> {
+    bootstrap_focus_depths(config, engine, limit).await
 }
 
 pub async fn serve_api(config: &AppConfig, cache: PacketCache) -> Result<()> {

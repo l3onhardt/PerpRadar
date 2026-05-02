@@ -66,6 +66,10 @@ impl FullBook {
     }
 
     pub fn apply_delta(&mut self, delta: BookDelta) -> Result<(), FullBookError> {
+        if delta.final_update_id <= self.last_update_id {
+            return Ok(());
+        }
+
         let sequence_ok = if self.bootstrapped {
             delta.previous_final_update_id == self.last_update_id
         } else {

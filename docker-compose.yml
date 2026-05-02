@@ -1,6 +1,7 @@
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:25.3
+    restart: unless-stopped
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -17,6 +18,7 @@ services:
   mock-binance:
     build:
       context: ./tools/mock-binance
+    restart: unless-stopped
     ports:
       - "19000:9000"
     environment:
@@ -25,15 +27,16 @@ services:
   perp-radar:
     build:
       context: .
+    restart: unless-stopped
     depends_on:
       clickhouse:
         condition: service_healthy
       mock-binance:
         condition: service_started
     ports:
-      - "8080:8080"
+      - "18080:18080"
     environment:
-      PERP_RADAR__API__BIND: "0.0.0.0:8080"
+      PERP_RADAR__API__BIND: "0.0.0.0:18080"
       PERP_RADAR__STORAGE__CLICKHOUSE_URL: "http://perp_radar:perp_radar@clickhouse:8123"
       PERP_RADAR__BINANCE__REST_BASE: "http://mock-binance:9000"
       PERP_RADAR__BINANCE__MARKET_WS_BASE: "ws://mock-binance:9000/market"

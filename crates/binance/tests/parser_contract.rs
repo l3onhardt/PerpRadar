@@ -87,8 +87,36 @@ fn parses_partial_depth_event() {
             assert_eq!(partial.stream, "btcusdt@depth20@500ms");
             assert_eq!(partial.symbol, "BTCUSDT");
             assert_eq!(partial.last_update_id, 110);
+            assert_eq!(partial.event_time_ms, 1714521600000);
             assert_eq!(partial.bids[0].price, 64000.0);
             assert_eq!(partial.asks[0].qty, 0.8);
+        }
+        other => panic!("expected partial depth event, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_partial_depth_event_even_when_payload_has_depth_update_type() {
+    let payload = r#"{
+      "stream":"btcusdt@depth20@500ms",
+      "data":{
+        "e":"depthUpdate",
+        "E":1714521600000,
+        "T":1714521600000,
+        "s":"BTCUSDT",
+        "lastUpdateId":110,
+        "bids":[["64000.0","1.2"]],
+        "asks":[["64001.0","0.8"]]
+      }
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    match event {
+        BinanceEvent::PartialDepth(partial) => {
+            assert_eq!(partial.symbol, "BTCUSDT");
+            assert_eq!(partial.last_update_id, 110);
+            assert_eq!(partial.event_time_ms, 1714521600000);
+            assert_eq!(partial.bids[0].price, 64000.0);
         }
         other => panic!("expected partial depth event, got {other:?}"),
     }
@@ -109,6 +137,36 @@ fn parses_exact_depth20_500ms_partial_depth_stream() {
 
     let event = parse_combined_event(payload).unwrap();
     assert!(matches!(event, BinanceEvent::PartialDepth(_)));
+}
+
+#[test]
+fn parses_partial_depth_update_shape_from_live_stream() {
+    let payload = r#"{
+      "stream":"btcusdt@depth20@500ms",
+      "data":{
+        "e":"depthUpdate",
+        "E":1777649155978,
+        "T":1777649155969,
+        "s":"BTCUSDT",
+        "U":10449855480970,
+        "u":10449855480972,
+        "pu":10449855480969,
+        "b":[["78493.90","2.937"],["78493.80","0.105"]],
+        "a":[["78494.00","31.957"],["78494.10","0.008"]]
+      }
+    }"#;
+
+    let event = parse_combined_event(payload).unwrap();
+    match event {
+        BinanceEvent::PartialDepth(partial) => {
+            assert_eq!(partial.symbol, "BTCUSDT");
+            assert_eq!(partial.last_update_id, 10449855480972);
+            assert_eq!(partial.event_time_ms, 1777649155978);
+            assert_eq!(partial.bids[0].price, 78493.90);
+            assert_eq!(partial.asks[0].qty, 31.957);
+        }
+        other => panic!("expected partial depth event, got {other:?}"),
+    }
 }
 
 #[test]

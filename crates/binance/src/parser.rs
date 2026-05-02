@@ -31,6 +31,7 @@ pub struct DepthEvent {
     pub previous_final_update_id: u64,
     pub bids: Vec<LevelDelta>,
     pub asks: Vec<LevelDelta>,
+    pub event_time_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +41,7 @@ pub struct PartialDepthEvent {
     pub last_update_id: u64,
     pub bids: Vec<BookLevel>,
     pub asks: Vec<BookLevel>,
+    pub event_time_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,16 +81,17 @@ struct CombinedPayload {
 
 pub fn parse_combined_event(payload: &str) -> anyhow::Result<BinanceEvent> {
     let combined: CombinedPayload = serde_json::from_str(payload)?;
+    if is_partial_depth_stream(&combined.stream) {
+        return parse_partial_depth(combined.stream, combined.data);
+    }
+    if is_empty_symbol_partial_depth_stream(&combined.stream) {
+        return parse_partial_depth(combined.stream, combined.data);
+    }
+
     match combined.data.get("e").and_then(|value| value.as_str()) {
         Some("kline") => parse_kline(combined.stream, combined.data),
         Some("depthUpdate") => parse_depth(combined.stream, combined.data),
         Some("forceOrder") => parse_force_order(combined.data),
-        _ if is_partial_depth_stream(&combined.stream) => {
-            parse_partial_depth(combined.stream, combined.data)
-        }
-        _ if is_empty_symbol_partial_depth_stream(&combined.stream) => {
-            parse_partial_depth(combined.stream, combined.data)
-        }
         _ if combined.stream == "!markPrice@arr" => parse_mark_prices(combined.data),
         _ if combined.stream == "!ticker@arr" => parse_tickers(combined.data),
         _ => Ok(BinanceEvent::Ignored),
@@ -160,6 +163,8 @@ fn parse_kline(stream: String, data: serde_json::Value) -> anyhow::Result<Binanc
 fn parse_depth(stream: String, data: serde_json::Value) -> anyhow::Result<BinanceEvent> {
     #[derive(Debug, Deserialize)]
     struct DepthPayload {
+        #[serde(rename = "E")]
+        event_time_ms: i64,
         #[serde(rename = "s")]
         symbol: String,
         #[serde(rename = "U")]
@@ -184,18 +189,29 @@ fn parse_depth(stream: String, data: serde_json::Value) -> anyhow::Result<Binanc
         previous_final_update_id: depth.previous_final_update_id,
         bids: parse_level_deltas("b", depth.bids)?,
         asks: parse_level_deltas("a", depth.asks)?,
+        event_time_ms: depth.event_time_ms,
     }))
 }
 
 fn parse_partial_depth(stream: String, data: serde_json::Value) -> anyhow::Result<BinanceEvent> {
     #[derive(Debug, Deserialize)]
     struct PartialDepthPayload {
+        #[serde(rename = "E")]
+        event_time_ms: i64,
         #[serde(rename = "s")]
         symbol: Option<String>,
+        #[serde(rename = "u")]
+        final_update_id: Option<u64>,
         #[serde(rename = "lastUpdateId")]
-        last_update_id: u64,
+        last_update_id: Option<u64>,
+        #[serde(default)]
         bids: Vec<[String; 2]>,
+        #[serde(default)]
         asks: Vec<[String; 2]>,
+        #[serde(rename = "b", default)]
+        bid_updates: Vec<[String; 2]>,
+        #[serde(rename = "a", default)]
+        ask_updates: Vec<[String; 2]>,
     }
 
     let depth: PartialDepthPayload = serde_json::from_value(data)?;
@@ -208,12 +224,27 @@ fn parse_partial_depth(stream: String, data: serde_json::Value) -> anyhow::Resul
             .context("partial depth stream is missing symbol")?
             .to_ascii_uppercase(),
     };
+    let last_update_id = depth
+        .last_update_id
+        .or(depth.final_update_id)
+        .context("partial depth payload missing lastUpdateId/u")?;
+    let bids = if depth.bids.is_empty() {
+        depth.bid_updates
+    } else {
+        depth.bids
+    };
+    let asks = if depth.asks.is_empty() {
+        depth.ask_updates
+    } else {
+        depth.asks
+    };
     Ok(BinanceEvent::PartialDepth(PartialDepthEvent {
         stream,
         symbol,
-        last_update_id: depth.last_update_id,
-        bids: parse_book_levels("bids", depth.bids)?,
-        asks: parse_book_levels("asks", depth.asks)?,
+        last_update_id,
+        bids: parse_book_levels("bids", bids)?,
+        asks: parse_book_levels("asks", asks)?,
+        event_time_ms: depth.event_time_ms,
     }))
 }
 

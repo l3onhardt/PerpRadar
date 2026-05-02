@@ -1,6 +1,7 @@
 use perp_radar_binance::rate_limiter::TokenBucket;
 use perp_radar_binance::rest_client::{
-    parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json, RestClient,
+    parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json,
+    parse_premium_index_json, RestClient,
 };
 use perp_radar_binance::ws_client::{stream_text_messages, ReconnectPolicy};
 use std::sync::Arc;
@@ -46,6 +47,10 @@ fn rest_client_builds_klines_and_depth_urls() {
     assert_eq!(
         client.funding_rate_url("SOLUSDT", 100).as_str(),
         "https://fapi.binance.com/fapi/v1/fundingRate?symbol=SOLUSDT&limit=100"
+    );
+    assert_eq!(
+        client.premium_index_url("btcusdt").as_str(),
+        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
     );
 }
 
@@ -101,6 +106,27 @@ fn parse_funding_rates_json_extracts_funding_rates() {
     let rates = parse_funding_rates_json(json).unwrap();
 
     assert_eq!(rates, vec![0.0001, 0.0002]);
+}
+
+#[test]
+fn parse_premium_index_json_extracts_mark_index_and_funding() {
+    let json = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "markPrice": "78493.90000000",
+        "indexPrice": "78529.48891304",
+        "lastFundingRate": "-0.00001334",
+        "nextFundingTime": 1777651200000_i64,
+        "time": 1777649155003_i64
+    });
+
+    let premium = parse_premium_index_json(json).unwrap();
+
+    assert_eq!(premium.symbol, "BTCUSDT");
+    assert_eq!(premium.mark_price, 78493.9);
+    assert_eq!(premium.index_price, 78529.48891304);
+    assert_eq!(premium.funding_rate, -0.00001334);
+    assert_eq!(premium.next_funding_time_ms, 1777651200000);
+    assert_eq!(premium.event_time_ms, 1777649155003);
 }
 
 #[tokio::test]

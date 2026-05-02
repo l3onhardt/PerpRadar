@@ -339,6 +339,7 @@ fn symbol_state_applies_full_depth_delta_and_marks_sequence_gap() {
             }],
             asks: vec![],
         },
+        event_time_ms: 1_714_521_600_000,
     }));
     assert!(!state.apply_full_depth_delta(FullDepthDeltaUpdate {
         symbol: "BTCUSDT".to_string(),
@@ -349,6 +350,7 @@ fn symbol_state_applies_full_depth_delta_and_marks_sequence_gap() {
             bids: vec![],
             asks: vec![],
         },
+        event_time_ms: 1_714_521_601_000,
     }));
     assert_eq!(state.quality.book_seq_ok, Some(false));
 }

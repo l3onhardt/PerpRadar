@@ -249,6 +249,59 @@ fn standard_packet_includes_market_liquidity_carry_and_event_state() {
 }
 
 #[test]
+fn standard_packet_tcs_remains_available_without_recent_liquidations() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    for idx in 0..64 {
+        let close = 100.0 + idx as f64;
+        state.apply_kline(KlineUpdate {
+            candle: Candle {
+                symbol: "BTCUSDT".to_string(),
+                open_time_ms: 1_700_000_000_000 + (idx as i64 * 60_000),
+                close_time_ms: 1_700_000_059_999 + (idx as i64 * 60_000),
+                open: close - 0.5,
+                high: close + 1.0,
+                low: close - 1.0,
+                close,
+                volume_base: 100.0 + idx as f64,
+                volume_quote: (100.0 + idx as f64) * close,
+                trades: 100 + idx as u64,
+                taker_buy_base: (100.0 + idx as f64) * 0.5,
+                taker_buy_quote: (100.0 + idx as f64) * close * 0.5,
+                is_closed: true,
+                source: "test".to_string(),
+            },
+        });
+    }
+    state.apply_mark_price(MarkPriceUpdate {
+        symbol: "BTCUSDT".to_string(),
+        mark_price: 164.0,
+        index_price: 163.5,
+        funding_rate: 0.0001,
+        next_funding_time_ms: 1_714_550_400_000,
+        event_time_ms: 1_714_521_600_000,
+    });
+    state.apply_partial_depth(PartialDepthUpdate {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 42,
+        bids: vec![BookLevel {
+            price: 163.9,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 164.1,
+            qty: 8.0,
+        }],
+        event_time_ms: 1_714_521_602_000,
+    });
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(packet.events.liq_5m_usd, None);
+    assert_eq!(packet.scores.lri, None);
+    assert!(packet.scores.tcs.is_some());
+}
+
+#[test]
 fn standard_packet_includes_u2_full_book_liquidity_and_slippage() {
     let mut state = SymbolState::new("BTCUSDT", 100);
     apply_closes(&mut state, &[100.0, 101.0, 102.0, 103.0, 104.0, 105.0]);

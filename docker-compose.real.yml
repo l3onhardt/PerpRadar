@@ -1,0 +1,6 @@
+services:
+  perp-radar:
+    environment:
+      PERP_RADAR__BINANCE__REST_BASE: "https://fapi.binance.com"
+      PERP_RADAR__BINANCE__MARKET_WS_BASE: "wss://fstream.binance.com"
+      PERP_RADAR__BINANCE__PUBLIC_WS_BASE: "wss://fstream.binance.com"

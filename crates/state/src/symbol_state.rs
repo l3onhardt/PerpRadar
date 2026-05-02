@@ -51,6 +51,7 @@ pub struct FullDepthSnapshotUpdate {
 pub struct FullDepthDeltaUpdate {
     pub symbol: String,
     pub delta: BookDelta,
+    pub event_time_ms: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -199,13 +200,15 @@ impl SymbolState {
         if self.full_book.is_none() {
             self.quality.book_mode = "partial20".to_string();
             self.quality.book_seq_ok = None;
+        }
+        if self.full_book.is_none() || self.quality.book_depth_coverage_bp.is_none() {
             self.quality.book_depth_coverage_bp =
                 self.partial_book.as_ref().and_then(book_depth_coverage_bp);
-            if self.quality.book_depth_coverage_bp.unwrap_or(0.0) < 5.0 {
-                self.quality.add_reason(QualityReason::DepthCoverageLt5Bp);
-            } else {
-                self.quality.clear_reason(QualityReason::DepthCoverageLt5Bp);
-            }
+        }
+        if self.quality.book_depth_coverage_bp.unwrap_or(0.0) < 5.0 {
+            self.quality.add_reason(QualityReason::DepthCoverageLt5Bp);
+        } else {
+            self.quality.clear_reason(QualityReason::DepthCoverageLt5Bp);
         }
         self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
@@ -277,6 +280,7 @@ impl SymbolState {
             Ok(()) => {
                 self.quality.book_mode = "full".to_string();
                 self.quality.book_seq_ok = Some(true);
+                self.last_event_time_ms = Some(update.event_time_ms);
                 self.quality.freshness_ms = 0;
                 self.quality.stale = false;
                 self.quality
@@ -302,22 +306,37 @@ impl SymbolState {
         true
     }
 
+    pub fn needs_full_book_resync(&self) -> bool {
+        self.full_book.is_some() && self.quality.book_seq_ok == Some(false)
+    }
+
     pub fn age_quality(&mut self, now_ms: i64, stale_after_ms: u64) {
+        self.quality =
+            self.quality_with_freshness(self.quality.clone(), now_ms, stale_after_ms);
+    }
+
+    pub fn quality_with_freshness(
+        &self,
+        mut quality: QualityState,
+        now_ms: i64,
+        stale_after_ms: u64,
+    ) -> QualityState {
         let Some(last_event_time_ms) = self.last_event_time_ms else {
-            self.quality.freshness_ms = u64::MAX;
-            self.quality.stale = true;
-            self.quality.add_reason(QualityReason::StaleMarketData);
-            return;
+            quality.freshness_ms = u64::MAX;
+            quality.stale = true;
+            quality.add_reason(QualityReason::StaleMarketData);
+            return quality;
         };
         let freshness = now_ms.saturating_sub(last_event_time_ms).max(0) as u64;
-        self.quality.freshness_ms = freshness;
+        quality.freshness_ms = freshness;
         if freshness > stale_after_ms {
-            self.quality.stale = true;
-            self.quality.add_reason(QualityReason::StaleMarketData);
+            quality.stale = true;
+            quality.add_reason(QualityReason::StaleMarketData);
         } else {
-            self.quality.stale = false;
-            self.quality.clear_reason(QualityReason::StaleMarketData);
+            quality.stale = false;
+            quality.clear_reason(QualityReason::StaleMarketData);
         }
+        quality
     }
 
     pub fn ret_15m(&self) -> Option<f64> {

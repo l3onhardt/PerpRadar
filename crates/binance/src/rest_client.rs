@@ -27,6 +27,16 @@ pub struct DepthSnapshot {
     pub asks: Vec<BookLevel>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PremiumIndex {
+    pub symbol: String,
+    pub mark_price: f64,
+    pub index_price: f64,
+    pub funding_rate: f64,
+    pub next_funding_time_ms: i64,
+    pub event_time_ms: i64,
+}
+
 pub fn parse_depth_snapshot_json(
     symbol: &str,
     value: serde_json::Value,
@@ -64,6 +74,28 @@ pub fn parse_funding_rates_json(value: serde_json::Value) -> anyhow::Result<Vec<
             Ok(parsed)
         })
         .collect()
+}
+
+pub fn parse_premium_index_json(value: serde_json::Value) -> anyhow::Result<PremiumIndex> {
+    let symbol = value
+        .get("symbol")
+        .and_then(serde_json::Value::as_str)
+        .context("premiumIndex response missing symbol")?
+        .to_ascii_uppercase();
+    Ok(PremiumIndex {
+        symbol,
+        mark_price: parse_named_decimal(&value, "markPrice")?,
+        index_price: parse_named_decimal(&value, "indexPrice")?,
+        funding_rate: parse_named_decimal(&value, "lastFundingRate")?,
+        next_funding_time_ms: value
+            .get("nextFundingTime")
+            .and_then(serde_json::Value::as_i64)
+            .context("premiumIndex response missing nextFundingTime")?,
+        event_time_ms: value
+            .get("time")
+            .and_then(serde_json::Value::as_i64)
+            .context("premiumIndex response missing time")?,
+    })
 }
 
 fn parse_depth_levels(value: &serde_json::Value, side: &str) -> anyhow::Result<Vec<BookLevel>> {
@@ -132,6 +164,18 @@ fn parse_json_decimal(value: &serde_json::Value, idx: usize, field: &str) -> any
     Ok(parsed)
 }
 
+fn parse_named_decimal(value: &serde_json::Value, field: &str) -> anyhow::Result<f64> {
+    let raw = value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| format!("premiumIndex response missing {field}"))?;
+    let parsed = raw
+        .parse::<f64>()
+        .with_context(|| format!("premiumIndex {field} must parse as decimal"))?;
+    anyhow::ensure!(parsed.is_finite(), "premiumIndex {field} must be finite");
+    Ok(parsed)
+}
+
 impl RestClient {
     pub fn new(base: &str) -> anyhow::Result<Self> {
         Ok(Self {
@@ -172,6 +216,16 @@ impl RestClient {
         url.query_pairs_mut()
             .append_pair("symbol", &symbol.to_ascii_uppercase())
             .append_pair("limit", &limit.to_string());
+        url
+    }
+
+    pub fn premium_index_url(&self, symbol: &str) -> Url {
+        let mut url = self
+            .base
+            .join("/fapi/v1/premiumIndex")
+            .expect("valid premiumIndex URL");
+        url.query_pairs_mut()
+            .append_pair("symbol", &symbol.to_ascii_uppercase());
         url
     }
 
@@ -238,5 +292,19 @@ impl RestClient {
             .json()
             .await
             .with_context(|| format!("decode fundingRate JSON from {url}"))
+    }
+
+    pub async fn premium_index_json(&self, symbol: &str) -> anyhow::Result<serde_json::Value> {
+        let url = self.premium_index_url(symbol);
+        self.client
+            .get(url.clone())
+            .send()
+            .await
+            .with_context(|| format!("send premiumIndex request to {url}"))?
+            .error_for_status()
+            .with_context(|| format!("premiumIndex request returned error status from {url}"))?
+            .json()
+            .await
+            .with_context(|| format!("decode premiumIndex JSON from {url}"))
     }
 }

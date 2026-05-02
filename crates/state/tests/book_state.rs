@@ -83,6 +83,37 @@ fn full_book_accepts_first_delta_that_covers_snapshot() {
 }
 
 #[test]
+fn full_book_ignores_delta_that_is_older_than_snapshot() {
+    let mut book = FullBook::from_snapshot(
+        "BTCUSDT",
+        10,
+        vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        vec![BookLevel {
+            price: 100.1,
+            qty: 5.0,
+        }],
+    );
+
+    book.apply_delta(BookDelta {
+        first_update_id: 1,
+        final_update_id: 9,
+        previous_final_update_id: 0,
+        bids: vec![LevelDelta {
+            price: 100.0,
+            qty: 99.0,
+        }],
+        asks: vec![],
+    })
+    .unwrap();
+
+    assert!(book.seq_ok());
+    assert!(book.visible_liquidity_usd(5.0).unwrap() < 2_000.0);
+}
+
+#[test]
 fn full_book_rejects_steady_state_gap_after_bootstrap() {
     let mut book = FullBook::from_snapshot(
         "BTCUSDT",

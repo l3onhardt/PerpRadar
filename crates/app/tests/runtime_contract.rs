@@ -264,6 +264,49 @@ fn runtime_engine_ages_packets_and_debugs_runtime_state() -> anyhow::Result<()> 
 }
 
 #[test]
+fn runtime_engine_updates_non_stale_packet_freshness() -> anyhow::Result<()> {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::with_config(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 1,
+            focus_n: 1,
+            stale_after_ms: 5_000,
+            funding_interval_hours: 8,
+        },
+    );
+
+    engine.apply_json(
+        r#"{
+          "stream":"!markPrice@arr",
+          "data":[{
+            "e":"markPriceUpdate",
+            "E":1714521600000,
+            "s":"BTCUSDT",
+            "p":"164.0",
+            "i":"163.5",
+            "r":"0.0001",
+            "T":1714550400000
+          }]
+        }"#,
+    )?;
+
+    engine.age_all(1_714_521_601_250);
+    let packet = cache.get("BTCUSDT").expect("packet is cached");
+
+    assert!(!packet.quality.stale);
+    assert_eq!(packet.quality.freshness_ms, 1_250);
+    assert!(!packet
+        .quality
+        .reasons
+        .contains(&perp_radar_core::quality::QualityReason::StaleMarketData));
+
+    Ok(())
+}
+
+#[test]
 fn runtime_engine_marks_full_book_gap_and_recovers_after_snapshot() -> anyhow::Result<()> {
     let cache = PacketCache::default();
     let mut engine = RuntimeEngine::new(vec!["BTCUSDT".to_string()], cache.clone(), 100);
@@ -422,6 +465,27 @@ fn runtime_engine_bootstraps_funding_history_into_packet_cache() {
     let packet = cache.get("BTCUSDT").expect("packet is cached");
     assert!(packet.carry.funding_z_7d.is_some());
     assert_eq!(packet.quality.funding_history_points, 4);
+}
+
+#[test]
+fn runtime_engine_bootstraps_premium_index_into_packet_cache() {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::new(vec!["BTCUSDT".to_string()], cache.clone(), 100);
+
+    assert!(engine.bootstrap_premium_index(
+        "BTCUSDT",
+        78493.9,
+        78529.48,
+        -0.00001334,
+        1_777_651_200_000,
+        1_777_649_155_003,
+    ));
+
+    let packet = cache.get("BTCUSDT").expect("packet is cached");
+    assert_eq!(packet.price.mark, Some(78493.9));
+    assert_eq!(packet.price.index, Some(78529.48));
+    assert_eq!(packet.carry.funding_now, Some(-0.00001334));
+    assert!(packet.carry.next_funding_time.is_some());
 }
 
 #[test]

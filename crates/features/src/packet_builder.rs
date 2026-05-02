@@ -253,7 +253,7 @@ fn scores_block(state: &SymbolState, candles: &[Candle]) -> ScoresBlock {
     );
     let technicals = technical_snapshot(candles);
     let volume_z = volume_spike_z(candles);
-    let liq_score = liquidation_total(state, 300_000).map(|value| (value / 1_000_000.0).min(3.0));
+    let lri = liquidation_total(state, 300_000).map(|value| (value / 1_000_000.0).min(3.0));
     let funding_abs = state
         .funding_rate
         .map(|rate| (rate.abs() / 0.0001).min(5.0));
@@ -269,14 +269,14 @@ fn scores_block(state: &SymbolState, candles: &[Candle]) -> ScoresBlock {
             .and_then(|snapshot| snapshot.atr_pct)
             .or_else(|| tail_return(candles, 5).map(f64::abs)),
         funding_z_abs: funding_abs,
-        liquidation_event_score: liq_score,
+        liquidation_event_score: Some(lri.unwrap_or(0.0)),
         squeeze_or_breakout_score: squeeze_or_breakout.or(Some(0.0)),
         liquidity_quality,
     });
 
     ScoresBlock {
         tcs,
-        lri: liq_score,
+        lri,
         dpi5: state
             .partial_book
             .as_ref()

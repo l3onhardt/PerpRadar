@@ -49,11 +49,11 @@ The local compose stack intentionally points Perp Radar at mock Binance:
 Check the runtime:
 
 ```bash
-curl http://127.0.0.1:8080/v1/health
-curl http://127.0.0.1:8080/v1/universe
-curl "http://127.0.0.1:8080/v1/packets/top?limit=3"
-curl http://127.0.0.1:8080/v1/debug/ws
-curl http://127.0.0.1:8080/v1/debug/rate_limits
+curl http://127.0.0.1:18080/v1/health
+curl http://127.0.0.1:18080/v1/universe
+curl "http://127.0.0.1:18080/v1/packets/top?limit=3"
+curl http://127.0.0.1:18080/v1/debug/ws
+curl http://127.0.0.1:18080/v1/debug/rate_limits
 ```
 
 Expected local smoke output:
@@ -107,9 +107,9 @@ This lightweight loop mirrors the completed local long-run:
 ```bash
 for i in $(seq 1 60); do
   date -Iseconds
-  curl -fsS http://127.0.0.1:8080/v1/health
-  curl -fsS http://127.0.0.1:8080/v1/universe
-  curl -fsS "http://127.0.0.1:8080/v1/packets/top?limit=3"
+  curl -fsS http://127.0.0.1:18080/v1/health
+  curl -fsS http://127.0.0.1:18080/v1/universe
+  curl -fsS "http://127.0.0.1:18080/v1/packets/top?limit=3"
   docker compose ps
   sleep 30
 done
@@ -158,7 +158,7 @@ curl http://127.0.0.1:19000/fapi/v1/ticker/24hr
 If focus symbols downgrade from full book:
 
 ```bash
-curl "http://127.0.0.1:8080/v1/packets/top?limit=3"
+curl "http://127.0.0.1:18080/v1/packets/top?limit=3"
 docker compose logs --since=10m perp-radar | grep -E 'gap|resync|depth|WARN|ERROR' || true
 ```
 

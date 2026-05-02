@@ -13,5 +13,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /app/target/release/perp-radar /usr/local/bin/perp-radar
 COPY config ./config
-EXPOSE 8080
+ENV PERP_RADAR__API__BIND=0.0.0.0:18080
+EXPOSE 18080
 CMD ["perp-radar"]
