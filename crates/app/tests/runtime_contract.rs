@@ -6,6 +6,7 @@ use perp_radar::runtime::{
 };
 use perp_radar_api::cache::PacketCache;
 use perp_radar_core::types::Candle;
+use perp_radar_storage::sink::{PersistEvent, StorageSink};
 use perp_radar_state::book_partial::BookLevel;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -446,6 +447,68 @@ fn runtime_engine_bootstraps_closed_rest_klines_into_packet_cache() {
     assert!(packet.chart.ema_20.is_some());
     assert!(packet.chart.rsi_14.is_some());
     assert!(packet.quality.warm);
+}
+
+#[tokio::test]
+async fn runtime_engine_emits_persistence_event_after_packet_refresh() {
+    let cache = PacketCache::default();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+    let mut engine = RuntimeEngine::with_config_and_storage(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 1,
+            focus_n: 1,
+            stale_after_ms: 15_000,
+            funding_interval_hours: 8,
+        },
+        StorageSink::channel(sender),
+    );
+
+    assert!(engine.bootstrap_depth_snapshot(DepthBootstrapSnapshot {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 123,
+        bids: vec![BookLevel {
+            price: 104.99,
+            qty: 100.0,
+        }],
+        asks: vec![BookLevel {
+            price: 105.01,
+            qty: 100.0,
+        }],
+    }));
+
+    let cached = cache.get("BTCUSDT").expect("packet is cached");
+    let event = receiver.recv().await.expect("persistence event is queued");
+
+    match event {
+        PersistEvent::Packet(packet) => {
+            assert_eq!(packet.symbol, cached.symbol);
+            assert_eq!(packet.ts, cached.ts);
+        }
+    }
+}
+
+#[test]
+fn runtime_engine_disabled_storage_sink_preserves_cache_behavior() {
+    let cache = PacketCache::default();
+    let mut engine = RuntimeEngine::new(vec!["BTCUSDT".to_string()], cache.clone(), 100);
+
+    assert!(engine.bootstrap_depth_snapshot(DepthBootstrapSnapshot {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 123,
+        bids: vec![BookLevel {
+            price: 104.99,
+            qty: 100.0,
+        }],
+        asks: vec![BookLevel {
+            price: 105.01,
+            qty: 100.0,
+        }],
+    }));
+
+    assert!(cache.get("BTCUSDT").is_some());
 }
 
 #[test]

@@ -1,7 +1,11 @@
 use perp_radar::config::AppConfig;
-use perp_radar::runtime::{build_ws_urls, serve_api, start_ingestion_tasks};
+use perp_radar::runtime::{build_ws_urls, serve_api, start_ingestion_tasks_with_storage};
 use perp_radar::supervisor::verify_required_storage;
 use perp_radar_api::cache::PacketCache;
+use perp_radar_storage::batcher::BatchConfig;
+use perp_radar_storage::clickhouse;
+use perp_radar_storage::sink::{PersistEvent, StorageSink};
+use perp_radar_storage::writer::spawn_clickhouse_writer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,7 +23,17 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let cache = PacketCache::default();
-    let _ingestion_tasks = start_ingestion_tasks(&config, cache.clone(), ws_urls);
+    let storage_client = clickhouse::client(&config.storage.clickhouse_url, &config.storage.database);
+    let (storage_tx, storage_rx) = tokio::sync::mpsc::channel::<PersistEvent>(
+        config.storage.batch_rows.saturating_mul(2).max(1024),
+    );
+    let _storage_writer = spawn_clickhouse_writer(
+        storage_client,
+        BatchConfig::new(config.storage.batch_rows, config.storage.batch_interval_ms),
+        storage_rx,
+    );
+    let _ingestion_tasks =
+        start_ingestion_tasks_with_storage(&config, cache.clone(), ws_urls, StorageSink::channel(storage_tx));
 
     serve_api(&config, cache).await
 }

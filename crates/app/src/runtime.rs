@@ -13,6 +13,7 @@ use perp_radar_binance::ws_client::stream_text_messages;
 use perp_radar_core::time::now_utc;
 use perp_radar_core::types::Candle;
 use perp_radar_features::packet_builder::build_standard_packet_with_funding_interval;
+use perp_radar_storage::sink::StorageSink;
 use perp_radar_features::ranking::{rank_u0_universe, UniverseRankingInput};
 use perp_radar_state::book_partial::BookLevel;
 use perp_radar_state::symbol_state::{
@@ -105,6 +106,7 @@ pub fn build_ws_urls(config: &AppConfig) -> Result<Vec<Url>> {
 pub struct RuntimeEngine {
     states: HashMap<String, SymbolState>,
     cache: PacketCache,
+    storage_sink: StorageSink,
     active_n: usize,
     focus_n: usize,
     pinned_symbols: Vec<String>,
@@ -162,6 +164,15 @@ impl RuntimeEngine {
         cache: PacketCache,
         config: RuntimeEngineConfig,
     ) -> Self {
+        Self::with_config_and_storage(symbols, cache, config, StorageSink::disabled())
+    }
+
+    pub fn with_config_and_storage(
+        symbols: Vec<String>,
+        cache: PacketCache,
+        config: RuntimeEngineConfig,
+        storage_sink: StorageSink,
+    ) -> Self {
         let active_n = config.active_n;
         let focus_n = config.focus_n;
         let pinned_symbols = canonical_symbols(symbols.clone(), active_n);
@@ -181,6 +192,7 @@ impl RuntimeEngine {
         Self {
             states,
             cache,
+            storage_sink,
             active_n,
             focus_n,
             pinned_symbols,
@@ -490,7 +502,8 @@ impl RuntimeEngine {
                 now_ms,
                 self.stale_after_ms,
             );
-            self.cache.upsert(packet);
+            self.cache.upsert(packet.clone());
+            self.storage_sink.persist_packet(packet);
         }
     }
 }
@@ -524,9 +537,18 @@ pub fn start_ingestion_tasks(
     cache: PacketCache,
     urls: Vec<Url>,
 ) -> Vec<JoinHandle<()>> {
+    start_ingestion_tasks_with_storage(config, cache, urls, StorageSink::disabled())
+}
+
+pub fn start_ingestion_tasks_with_storage(
+    config: &AppConfig,
+    cache: PacketCache,
+    urls: Vec<Url>,
+    storage_sink: StorageSink,
+) -> Vec<JoinHandle<()>> {
     let (tx, mut rx) = mpsc::channel::<String>(4096);
     let symbols = config.universe.always_focus.clone();
-    let mut engine = RuntimeEngine::with_config(
+    let mut engine = RuntimeEngine::with_config_and_storage(
         symbols,
         cache,
         RuntimeEngineConfig {
@@ -536,6 +558,7 @@ pub fn start_ingestion_tasks(
             stale_after_ms: config.packets.standard_interval_ms.saturating_mul(15),
             funding_interval_hours: 8,
         },
+        storage_sink,
     );
 
     let bootstrap_config = config.clone();

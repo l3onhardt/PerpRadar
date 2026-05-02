@@ -21,7 +21,7 @@ async-trait = "0.1"
 axum = "0.7"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
-clickhouse = "0.13"
+clickhouse = { version = "0.13", features = ["chrono"] }
 config = "0.14"
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
