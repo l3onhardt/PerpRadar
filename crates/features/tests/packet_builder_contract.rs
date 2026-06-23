@@ -53,7 +53,7 @@ fn standard_packet_uses_symbol_price_and_quality_from_state() {
     let packet = build_standard_packet(&state, 1, 15, 3);
 
     assert_eq!(packet.symbol, "BTCUSDT");
-    assert_eq!(packet.packet_schema, "2.1");
+    assert_eq!(packet.packet_schema, "2.2");
     assert_eq!(packet.profile, PacketProfile::Standard);
     assert_eq!(packet.universe.tier, UniverseTier::U2);
     assert_eq!(packet.universe.active_n, 15);
@@ -136,6 +136,43 @@ fn clean_history_computes_one_and_five_minute_returns_from_tail() {
 
     assert_eq!(packet.price.ret_1m, Some((150.0 - 140.0) / 140.0));
     assert_eq!(packet.price.ret_5m, Some(0.5));
+}
+
+#[test]
+fn standard_packet_includes_structure_derivatives_and_orderflow_blocks() {
+    let mut state = SymbolState::new("BTCUSDT", 100);
+    for idx in 0..25 {
+        let close = 100.0 + idx as f64;
+        state.apply_kline(KlineUpdate {
+            candle: Candle {
+                symbol: "BTCUSDT".to_string(),
+                open_time_ms: 1_700_000_000_000 + (idx as i64 * 60_000),
+                close_time_ms: 1_700_000_059_999 + (idx as i64 * 60_000),
+                open: close - 0.5,
+                high: close + 2.0,
+                low: close - 3.0,
+                close,
+                volume_base: 100.0,
+                volume_quote: close * 100.0,
+                trades: 100,
+                taker_buy_base: 40.0 + idx as f64,
+                taker_buy_quote: close * (40.0 + idx as f64),
+                is_closed: true,
+                source: "test".to_string(),
+            },
+        });
+    }
+
+    let packet = build_standard_packet(&state, 1, 15, 3);
+
+    assert_eq!(packet.packet_schema, "2.2");
+    assert_eq!(packet.structure.donchian20_hi, Some(126.0));
+    assert_eq!(packet.structure.donchian20_lo, Some(102.0));
+    assert!(packet.orderflow.ofi.unwrap().is_finite());
+    assert!(packet.orderflow.ofi_1m.unwrap().is_finite());
+    assert!(packet.orderflow.ofi_5m.unwrap().is_finite());
+    assert!(packet.derivatives.oi.is_none());
+    assert!(packet.derivatives.oi_z.is_none());
 }
 
 #[test]
@@ -358,7 +395,10 @@ fn packet_builder_moves_old_score_meanings_to_legacy_scores() {
 
     assert_eq!(packet.scores.tcs, None);
     assert!(packet.legacy_scores.candidate_score.is_some());
-    assert_eq!(packet.legacy_scores.notional_imbalance_i5, packet.liquidity.i5);
+    assert_eq!(
+        packet.legacy_scores.notional_imbalance_i5,
+        packet.liquidity.i5
+    );
     assert_eq!(
         packet.legacy_scores.volume_spike_z,
         packet.events.volume_spike_z
@@ -389,7 +429,10 @@ fn packet_builder_uses_full_book_qty_imbalance_for_dpi5_and_dpi10() {
 
     assert_eq!(packet.scores.dpi5, Some((50.0 - 25.0) / 75.0));
     assert_eq!(packet.scores.dpi10, Some((100.0 - 50.0) / 150.0));
-    assert_eq!(packet.score_meta["DPI5"].book_source.as_deref(), Some("full"));
+    assert_eq!(
+        packet.score_meta["DPI5"].book_source.as_deref(),
+        Some("full")
+    );
     assert!(packet.score_meta["DPI5"].missing.is_empty());
     assert!(packet.score_meta["DPI10"].missing.is_empty());
 }

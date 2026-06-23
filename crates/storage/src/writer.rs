@@ -40,7 +40,8 @@ pub struct PendingRows {
 
 impl PendingRows {
     pub fn push_packet(&mut self, packet: &StandardPacket) -> Result<()> {
-        self.latest_packets.push(LatestPacketRow::from_packet(packet)?);
+        self.latest_packets
+            .push(LatestPacketRow::from_packet(packet)?);
         if self.feature_dedupe.should_write(packet) {
             self.features_1m.push(Feature1mRow::from_packet(packet)?);
         }
@@ -94,7 +95,8 @@ pub fn spawn_clickhouse_writer(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut pending = PendingRows::default();
-        let mut flush_interval = interval(std::time::Duration::from_millis(config.flush_interval_ms));
+        let mut flush_interval =
+            interval(std::time::Duration::from_millis(config.flush_interval_ms));
         flush_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {

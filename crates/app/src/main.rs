@@ -23,7 +23,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let cache = PacketCache::default();
-    let storage_client = clickhouse::client(&config.storage.clickhouse_url, &config.storage.database);
+    let storage_client =
+        clickhouse::client(&config.storage.clickhouse_url, &config.storage.database);
     let (storage_tx, storage_rx) = tokio::sync::mpsc::channel::<PersistEvent>(
         config.storage.batch_rows.saturating_mul(2).max(1024),
     );
@@ -32,8 +33,12 @@ async fn main() -> anyhow::Result<()> {
         BatchConfig::new(config.storage.batch_rows, config.storage.batch_interval_ms),
         storage_rx,
     );
-    let _ingestion_tasks =
-        start_ingestion_tasks_with_storage(&config, cache.clone(), ws_urls, StorageSink::channel(storage_tx));
+    let _ingestion_tasks = start_ingestion_tasks_with_storage(
+        &config,
+        cache.clone(),
+        ws_urls,
+        StorageSink::channel(storage_tx),
+    );
 
     serve_api(&config, cache).await
 }

@@ -15,16 +15,16 @@ fn market_combined_stream_uses_market_base() {
 }
 
 #[test]
-fn public_combined_stream_uses_public_base() {
+fn public_combined_stream_uses_root_base() {
     let url = combined_stream_url(
-        WsBase::Public("wss://fstream.binance.com/public".to_string()),
+        WsBase::Public("wss://fstream.binance.com".to_string()),
         &["btcusdt@depth20@500ms"],
     )
     .unwrap();
 
     assert_eq!(
         url.as_str(),
-        "wss://fstream.binance.com/public/stream?streams=btcusdt@depth20@500ms"
+        "wss://fstream.binance.com/stream?streams=btcusdt@depth20@500ms"
     );
 }
 

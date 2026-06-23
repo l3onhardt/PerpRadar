@@ -6,8 +6,8 @@ use perp_radar::runtime::{
 };
 use perp_radar_api::cache::PacketCache;
 use perp_radar_core::types::Candle;
-use perp_radar_storage::sink::{PersistEvent, StorageSink};
 use perp_radar_state::book_partial::BookLevel;
+use perp_radar_storage::sink::{PersistEvent, StorageSink};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -53,8 +53,8 @@ fn runtime_builds_expected_ws_urls() -> anyhow::Result<()> {
         vec![
             "wss://fstream.binance.com/market/stream?streams=!markPrice@arr/!ticker@arr/!forceOrder@arr",
             "wss://fstream.binance.com/market/stream?streams=btcusdt@kline_1m/ethusdt@kline_1m/solusdt@kline_1m",
-            "wss://fstream.binance.com/public/stream?streams=btcusdt@depth20@500ms/ethusdt@depth20@500ms/solusdt@depth20@500ms",
-            "wss://fstream.binance.com/public/stream?streams=btcusdt@depth@500ms/ethusdt@depth@500ms/solusdt@depth@500ms",
+            "wss://fstream.binance.com/stream?streams=btcusdt@depth20@500ms/ethusdt@depth20@500ms/solusdt@depth20@500ms",
+            "wss://fstream.binance.com/stream?streams=btcusdt@depth@500ms/ethusdt@depth@500ms/solusdt@depth@500ms",
         ]
     );
 
@@ -168,6 +168,11 @@ fn runtime_engine_applies_events_and_refreshes_packet_cache() -> anyhow::Result<
     assert!(packet.chart.rsi_14.is_some());
     assert!(packet.liquidity.spread_bp.is_some());
     assert_eq!(packet.carry.funding_now, Some(0.0001));
+    engine.apply_open_interest("BTCUSDT", 105_000.0, 1714521604000);
+    let packet = cache.get("BTCUSDT").expect("packet is refreshed after oi");
+    assert_eq!(packet.derivatives.oi, Some(105_000.0));
+    assert_eq!(packet.derivatives.oi_notional_usd, Some(17_220_000.0));
+    assert_eq!(packet.derivatives.oi_z, None);
     assert_eq!(packet.events.liq_1m_usd, Some(400.0));
     assert_eq!(packet.scores.tcs, None);
     assert!(packet.legacy_scores.candidate_score.is_some());
@@ -373,6 +378,7 @@ fn runtime_engine_marks_full_book_gap_and_recovers_after_snapshot() -> anyhow::R
           }
         }"#,
     )?;
+    engine.age_all(1_714_521_601_000);
     let gap_packet = cache.get("BTCUSDT").expect("packet is cached");
     assert_eq!(gap_packet.quality.book_seq_ok, Some(false));
     assert_eq!(engine.debug_snapshot().full_book_resync_needed, 1);
@@ -405,6 +411,7 @@ fn runtime_engine_marks_full_book_gap_and_recovers_after_snapshot() -> anyhow::R
           }
         }"#,
     )?;
+    engine.age_all(1_714_521_602_000);
 
     let recovered = cache.get("BTCUSDT").expect("packet is cached");
     assert_eq!(recovered.quality.book_seq_ok, Some(true));
@@ -488,6 +495,91 @@ async fn runtime_engine_emits_persistence_event_after_packet_refresh() {
             assert_eq!(packet.ts, cached.ts);
         }
     }
+}
+
+#[tokio::test]
+async fn runtime_engine_coalesces_depth_events_until_age_tick() {
+    let cache = PacketCache::default();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+    let mut engine = RuntimeEngine::with_config_and_storage(
+        vec!["BTCUSDT".to_string()],
+        cache.clone(),
+        RuntimeEngineConfig {
+            candle_capacity: 100,
+            active_n: 1,
+            focus_n: 1,
+            stale_after_ms: 15_000,
+            funding_interval_hours: 8,
+        },
+        StorageSink::channel(sender),
+    );
+
+    assert!(engine.bootstrap_depth_snapshot(DepthBootstrapSnapshot {
+        symbol: "BTCUSDT".to_string(),
+        last_update_id: 10,
+        bids: vec![BookLevel {
+            price: 100.0,
+            qty: 10.0,
+        }],
+        asks: vec![BookLevel {
+            price: 100.1,
+            qty: 6.0,
+        }],
+    }));
+    receiver.recv().await.expect("bootstrap emits one packet");
+
+    engine
+        .apply_json(
+            r#"{
+          "stream":"btcusdt@depth@500ms",
+          "data":{
+            "e":"depthUpdate",
+            "E":1714521600000,
+            "T":1714521600000,
+            "s":"BTCUSDT",
+            "U":8,
+            "u":11,
+            "pu":7,
+            "b":[["100.0","12.0"]],
+            "a":[]
+          }
+        }"#,
+        )
+        .unwrap();
+    engine
+        .apply_json(
+            r#"{
+          "stream":"btcusdt@depth@500ms",
+          "data":{
+            "e":"depthUpdate",
+            "E":1714521600100,
+            "T":1714521600100,
+            "s":"BTCUSDT",
+            "U":12,
+            "u":12,
+            "pu":11,
+            "b":[["100.0","14.0"]],
+            "a":[]
+          }
+        }"#,
+        )
+        .unwrap();
+
+    assert!(receiver.try_recv().is_err());
+
+    engine.age_all(1_714_521_601_000);
+
+    let event = receiver
+        .recv()
+        .await
+        .expect("age tick emits coalesced packet");
+    match event {
+        PersistEvent::Packet(packet) => {
+            assert_eq!(packet.symbol, "BTCUSDT");
+            assert!(packet.liquidity.liq_5bp_usd.unwrap() > 1_700.0);
+        }
+    }
+    assert!(receiver.try_recv().is_err());
 }
 
 #[test]
@@ -617,6 +709,7 @@ fn runtime_engine_applies_full_depth_delta_after_snapshot() -> anyhow::Result<()
           }
         }"#,
     )?;
+    engine.age_all(1_714_521_601_000);
 
     let packet = cache.get("BTCUSDT").expect("packet is cached");
     assert_eq!(packet.quality.book_seq_ok, Some(true));

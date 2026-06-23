@@ -189,11 +189,7 @@ impl ScoreHistoryState {
         }
     }
 
-    pub fn record_carry_components(
-        &mut self,
-        funding_z_7d: Option<f64>,
-        basis_bp: Option<f64>,
-    ) {
+    pub fn record_carry_components(&mut self, funding_z_7d: Option<f64>, basis_bp: Option<f64>) {
         if let Some(value) = funding_z_7d {
             self.abs_fundz_7d.push(value.abs());
         }

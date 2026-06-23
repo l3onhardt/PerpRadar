@@ -3,3 +3,5 @@
 /.DS_Store
 *.log
 /logs/
+/reports/
+/scripts/__pycache__/

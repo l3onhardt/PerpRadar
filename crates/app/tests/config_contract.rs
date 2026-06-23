@@ -213,7 +213,7 @@ fn write_config_variant(
             r#"
 binance:
   market_ws_base: "wss://fstream.binance.com/market"
-  public_ws_base: "wss://fstream.binance.com/public"
+  public_ws_base: "wss://fstream.binance.com"
   rest_base: "https://fapi.binance.com"
 universe:
   quote_assets: ["USDT"]

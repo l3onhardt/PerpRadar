@@ -37,6 +37,13 @@ pub struct PremiumIndex {
     pub event_time_ms: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenInterest {
+    pub symbol: String,
+    pub open_interest: f64,
+    pub event_time_ms: i64,
+}
+
 pub fn parse_depth_snapshot_json(
     symbol: &str,
     value: serde_json::Value,
@@ -74,6 +81,22 @@ pub fn parse_funding_rates_json(value: serde_json::Value) -> anyhow::Result<Vec<
             Ok(parsed)
         })
         .collect()
+}
+
+pub fn parse_open_interest_json(value: serde_json::Value) -> anyhow::Result<OpenInterest> {
+    let symbol = value
+        .get("symbol")
+        .and_then(serde_json::Value::as_str)
+        .context("openInterest response missing symbol")?
+        .to_ascii_uppercase();
+    Ok(OpenInterest {
+        symbol,
+        open_interest: parse_named_decimal_with_context(&value, "openInterest", "openInterest")?,
+        event_time_ms: value
+            .get("time")
+            .and_then(serde_json::Value::as_i64)
+            .context("openInterest response missing time")?,
+    })
 }
 
 pub fn parse_premium_index_json(value: serde_json::Value) -> anyhow::Result<PremiumIndex> {
@@ -165,14 +188,22 @@ fn parse_json_decimal(value: &serde_json::Value, idx: usize, field: &str) -> any
 }
 
 fn parse_named_decimal(value: &serde_json::Value, field: &str) -> anyhow::Result<f64> {
+    parse_named_decimal_with_context(value, field, "premiumIndex")
+}
+
+fn parse_named_decimal_with_context(
+    value: &serde_json::Value,
+    field: &str,
+    context_name: &str,
+) -> anyhow::Result<f64> {
     let raw = value
         .get(field)
         .and_then(serde_json::Value::as_str)
-        .with_context(|| format!("premiumIndex response missing {field}"))?;
+        .with_context(|| format!("{context_name} response missing {field}"))?;
     let parsed = raw
         .parse::<f64>()
-        .with_context(|| format!("premiumIndex {field} must parse as decimal"))?;
-    anyhow::ensure!(parsed.is_finite(), "premiumIndex {field} must be finite");
+        .with_context(|| format!("{context_name} {field} must parse as decimal"))?;
+    anyhow::ensure!(parsed.is_finite(), "{context_name} {field} must be finite");
     Ok(parsed)
 }
 
@@ -224,6 +255,16 @@ impl RestClient {
             .base
             .join("/fapi/v1/premiumIndex")
             .expect("valid premiumIndex URL");
+        url.query_pairs_mut()
+            .append_pair("symbol", &symbol.to_ascii_uppercase());
+        url
+    }
+
+    pub fn open_interest_url(&self, symbol: &str) -> Url {
+        let mut url = self
+            .base
+            .join("/fapi/v1/openInterest")
+            .expect("valid openInterest URL");
         url.query_pairs_mut()
             .append_pair("symbol", &symbol.to_ascii_uppercase());
         url
@@ -306,5 +347,19 @@ impl RestClient {
             .json()
             .await
             .with_context(|| format!("decode premiumIndex JSON from {url}"))
+    }
+
+    pub async fn open_interest_json(&self, symbol: &str) -> anyhow::Result<serde_json::Value> {
+        let url = self.open_interest_url(symbol);
+        self.client
+            .get(url.clone())
+            .send()
+            .await
+            .with_context(|| format!("send openInterest request to {url}"))?
+            .error_for_status()
+            .with_context(|| format!("openInterest request returned error status from {url}"))?
+            .json()
+            .await
+            .with_context(|| format!("decode openInterest JSON from {url}"))
     }
 }

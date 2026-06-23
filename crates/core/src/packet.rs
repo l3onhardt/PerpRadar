@@ -86,6 +86,28 @@ pub struct EventsBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct StructureBlock {
+    pub donchian20_hi: Option<f64>,
+    pub donchian20_lo: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DerivativesBlock {
+    pub oi: Option<f64>,
+    pub oi_notional_usd: Option<f64>,
+    pub oi_z: Option<f64>,
+    pub oi_delta_5m: Option<f64>,
+    pub crowded_side: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct OrderflowBlock {
+    pub ofi: Option<f64>,
+    pub ofi_1m: Option<f64>,
+    pub ofi_5m: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ScoresBlock {
     #[serde(rename = "TCS")]
     pub tcs: Option<f64>,
@@ -147,6 +169,9 @@ pub struct StandardPacket {
     pub liquidity: LiquidityBlock,
     pub carry: CarryBlock,
     pub events: EventsBlock,
+    pub structure: StructureBlock,
+    pub derivatives: DerivativesBlock,
+    pub orderflow: OrderflowBlock,
     pub scores: ScoresBlock,
     pub score_meta: BTreeMap<String, ScoreMeta>,
     pub legacy_scores: LegacyScoresBlock,

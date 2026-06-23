@@ -1,7 +1,8 @@
 use chrono::{TimeZone, Utc};
 use perp_radar_core::packet::{
-    CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
-    PriceBlock, ScoresBlock, StandardPacket, UniverseBlock,
+    CarryBlock, ChartBlock, DerivativesBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock,
+    OrderflowBlock, PacketProfile, PriceBlock, ScoresBlock, StandardPacket, StructureBlock,
+    UniverseBlock,
 };
 use perp_radar_core::quality::{QualityReason, QualityState};
 use perp_radar_core::types::UniverseTier;
@@ -51,6 +52,9 @@ fn packet_at(minute: u32) -> StandardPacket {
             ..CarryBlock::default()
         },
         events: EventsBlock::default(),
+        structure: StructureBlock::default(),
+        derivatives: DerivativesBlock::default(),
+        orderflow: OrderflowBlock::default(),
         scores: ScoresBlock {
             tcs: Some(1.0),
             lri: None,
@@ -249,11 +253,15 @@ async fn row_types_insert_into_clickhouse_datetime64_tables_when_available() {
     let latest = LatestPacketRow::from_packet(&packet).unwrap();
     let feature = Feature1mRow::from_packet(&packet).unwrap();
 
-    let mut latest_insert = client.insert("perp_radar.persistence_contract_latest").unwrap();
+    let mut latest_insert = client
+        .insert("perp_radar.persistence_contract_latest")
+        .unwrap();
     latest_insert.write(&latest).await.unwrap();
     latest_insert.end().await.unwrap();
 
-    let mut feature_insert = client.insert("perp_radar.persistence_contract_features").unwrap();
+    let mut feature_insert = client
+        .insert("perp_radar.persistence_contract_features")
+        .unwrap();
     feature_insert.write(&feature).await.unwrap();
     feature_insert.end().await.unwrap();
 

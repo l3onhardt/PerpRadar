@@ -65,8 +65,8 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use perp_radar_core::packet::{
-        CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
-        PriceBlock, ScoresBlock, UniverseBlock,
+        CarryBlock, ChartBlock, DerivativesBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock,
+        OrderflowBlock, PacketProfile, PriceBlock, ScoresBlock, StructureBlock, UniverseBlock,
     };
     use perp_radar_core::quality::QualityState;
     use perp_radar_core::types::UniverseTier;
@@ -90,6 +90,9 @@ mod tests {
             liquidity: LiquidityBlock::default(),
             carry: CarryBlock::default(),
             events: EventsBlock::default(),
+            structure: StructureBlock::default(),
+            derivatives: DerivativesBlock::default(),
+            orderflow: OrderflowBlock::default(),
             scores: ScoresBlock::default(),
             score_meta: std::collections::BTreeMap::new(),
             legacy_scores: LegacyScoresBlock::default(),

@@ -6,20 +6,20 @@ use perp_radar_api::{cache::PacketCache, routes};
 use perp_radar_binance::parser::{parse_combined_event, BinanceEvent};
 use perp_radar_binance::rest_client::{
     parse_depth_snapshot_json, parse_funding_rates_json, parse_klines_json,
-    parse_premium_index_json, RestClient,
+    parse_open_interest_json, parse_premium_index_json, RestClient,
 };
 use perp_radar_binance::streams::{combined_stream_url, WsBase};
 use perp_radar_binance::ws_client::stream_text_messages;
 use perp_radar_core::time::now_utc;
 use perp_radar_core::types::Candle;
 use perp_radar_features::packet_builder::build_standard_packet_with_funding_interval;
-use perp_radar_storage::sink::StorageSink;
 use perp_radar_features::ranking::{rank_u0_universe, UniverseRankingInput};
 use perp_radar_state::book_partial::BookLevel;
 use perp_radar_state::symbol_state::{
     ForceOrderUpdate, FullDepthDeltaUpdate, FullDepthSnapshotUpdate, KlineUpdate, MarkPriceUpdate,
-    PartialDepthUpdate, SymbolState, TickerUpdate,
+    OpenInterestUpdate, PartialDepthUpdate, SymbolState, TickerUpdate,
 };
+use perp_radar_storage::sink::StorageSink;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -302,7 +302,6 @@ impl RuntimeEngine {
                         event_time_ms: event.event_time_ms,
                         delta: event.into(),
                     });
-                    self.refresh_symbol(&symbol);
                 }
                 false
             }
@@ -355,6 +354,28 @@ impl RuntimeEngine {
             return false;
         };
         let accepted = state.apply_funding_history(&symbol, rates);
+        if accepted {
+            self.refresh_symbol(&symbol);
+        }
+        accepted
+    }
+
+    pub fn apply_open_interest(
+        &mut self,
+        symbol: &str,
+        open_interest: f64,
+        event_time_ms: i64,
+    ) -> bool {
+        let symbol = symbol.to_ascii_uppercase();
+        self.ensure_state(&symbol);
+        let Some(state) = self.states.get_mut(&symbol) else {
+            return false;
+        };
+        let accepted = state.apply_open_interest(OpenInterestUpdate {
+            symbol: symbol.clone(),
+            open_interest,
+            event_time_ms,
+        });
         if accepted {
             self.refresh_symbol(&symbol);
         }
@@ -497,11 +518,8 @@ impl RuntimeEngine {
                 self.focus_n,
                 self.funding_interval_hours,
             );
-            packet.quality = state.quality_with_freshness(
-                packet.quality,
-                now_ms,
-                self.stale_after_ms,
-            );
+            packet.quality =
+                state.quality_with_freshness(packet.quality, now_ms, self.stale_after_ms);
             self.cache.upsert(packet.clone());
             self.storage_sink.persist_packet(packet);
         }
@@ -579,8 +597,14 @@ pub fn start_ingestion_tasks_with_storage(
             Ok(accepted) => tracing::info!(accepted, "bootstrapped focus premium indexes"),
             Err(error) => tracing::warn!(%error, "focus premium index bootstrap failed"),
         }
+        match refresh_focus_open_interest(&bootstrap_config, &mut engine).await {
+            Ok(accepted) => tracing::info!(accepted, "bootstrapped focus open interest"),
+            Err(error) => tracing::warn!(%error, "focus open interest bootstrap failed"),
+        }
 
         let mut age_tick = interval(std::time::Duration::from_secs(1));
+        let mut oi_tick = interval(std::time::Duration::from_secs(30));
+        oi_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         age_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
@@ -603,6 +627,11 @@ pub fn start_ingestion_tasks_with_storage(
                 }
                 _ = age_tick.tick() => {
                     engine.age_all(now_utc().timestamp_millis());
+                }
+                _ = oi_tick.tick() => {
+                    if let Err(error) = refresh_focus_open_interest(&bootstrap_config, &mut engine).await {
+                        tracing::warn!(%error, "focus open interest refresh failed");
+                    }
                 }
             }
         }
@@ -694,6 +723,30 @@ pub async fn bootstrap_focus_funding_history(
         let rates = parse_funding_rates_json(json)
             .with_context(|| format!("parse bootstrap funding history for {symbol}"))?;
         if engine.bootstrap_funding_history(symbol, rates) {
+            accepted += 1;
+        }
+    }
+    Ok(accepted)
+}
+
+pub async fn refresh_focus_open_interest(
+    config: &AppConfig,
+    engine: &mut RuntimeEngine,
+) -> Result<usize> {
+    let client = RestClient::new(&config.binance.rest_base)?;
+    let mut accepted = 0;
+    for symbol in &config.universe.always_focus {
+        let json = client
+            .open_interest_json(symbol)
+            .await
+            .with_context(|| format!("refresh open interest for {symbol}"))?;
+        let open_interest = parse_open_interest_json(json)
+            .with_context(|| format!("parse open interest for {symbol}"))?;
+        if engine.apply_open_interest(
+            &open_interest.symbol,
+            open_interest.open_interest,
+            open_interest.event_time_ms,
+        ) {
             accepted += 1;
         }
     }

@@ -1,4 +1,19 @@
 use perp_radar_binance::parser::{parse_combined_event, BinanceEvent};
+use perp_radar_binance::rest_client::parse_open_interest_json;
+
+#[test]
+fn parses_open_interest_rest_response() {
+    let value = serde_json::json!({
+        "symbol": "spxusdt",
+        "openInterest": "2234567.891",
+        "time": 1714521604000_i64
+    });
+
+    let parsed = parse_open_interest_json(value).unwrap();
+    assert_eq!(parsed.symbol, "SPXUSDT");
+    assert_eq!(parsed.open_interest, 2_234_567.891);
+    assert_eq!(parsed.event_time_ms, 1714521604000_i64);
+}
 
 #[test]
 fn parses_combined_kline_event() {

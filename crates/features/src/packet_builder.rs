@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use chrono::Utc;
 use perp_radar_core::packet::{
-    CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
-    PriceBlock, ScoreMeta, ScoresBlock, StandardPacket, UniverseBlock,
+    CarryBlock, ChartBlock, DerivativesBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock,
+    OrderflowBlock, PacketProfile, PriceBlock, ScoreMeta, ScoresBlock, StandardPacket,
+    StructureBlock, UniverseBlock,
 };
 use perp_radar_core::quality::QualityReason;
 use perp_radar_core::types::{Candle, UniverseTier};
@@ -54,7 +55,7 @@ pub fn build_standard_packet_with_funding_interval(
     }
 
     StandardPacket {
-        packet_schema: "2.1".to_string(),
+        packet_schema: "2.2".to_string(),
         ts: Utc::now(),
         symbol: state.symbol.clone(),
         rank,
@@ -69,11 +70,89 @@ pub fn build_standard_packet_with_funding_interval(
         liquidity,
         carry,
         events,
+        structure: structure_block(&candles),
+        derivatives: derivatives_block(state),
+        orderflow: orderflow_block(&candles),
         scores: score_eval.scores,
         score_meta: score_eval.meta,
         legacy_scores: legacy_scores_block(state, &candles),
         quality,
     }
+}
+
+fn structure_block(candles: &[Candle]) -> StructureBlock {
+    let tail = if candles.len() >= 20 {
+        &candles[candles.len() - 20..]
+    } else {
+        &[]
+    };
+    StructureBlock {
+        donchian20_hi: finite_max(tail.iter().map(|candle| candle.high)),
+        donchian20_lo: finite_min(tail.iter().map(|candle| candle.low)),
+    }
+}
+
+fn derivatives_block(state: &SymbolState) -> DerivativesBlock {
+    let oi_notional_usd = state
+        .open_interest
+        .zip(state.mark_price)
+        .map(|(open_interest, mark_price)| open_interest * mark_price)
+        .filter(|value| value.is_finite());
+    DerivativesBlock {
+        oi: state.open_interest,
+        oi_notional_usd,
+        oi_z: None,
+        oi_delta_5m: None,
+        crowded_side: None,
+    }
+}
+
+fn orderflow_block(candles: &[Candle]) -> OrderflowBlock {
+    OrderflowBlock {
+        ofi: taker_buy_imbalance(candles.last()),
+        ofi_1m: taker_buy_imbalance(candles.last()),
+        ofi_5m: taker_buy_imbalance_window(candles, 5),
+    }
+}
+
+fn finite_max(values: impl Iterator<Item = f64>) -> Option<f64> {
+    values
+        .filter(|value| value.is_finite())
+        .reduce(|acc, value| acc.max(value))
+}
+
+fn finite_min(values: impl Iterator<Item = f64>) -> Option<f64> {
+    values
+        .filter(|value| value.is_finite())
+        .reduce(|acc, value| acc.min(value))
+}
+
+fn taker_buy_imbalance(candle: Option<&Candle>) -> Option<f64> {
+    let candle = candle?;
+    if !candle.volume_quote.is_finite() || candle.volume_quote <= 0.0 {
+        return None;
+    }
+    let sell_quote = candle.volume_quote - candle.taker_buy_quote;
+    let imbalance = (candle.taker_buy_quote - sell_quote) / candle.volume_quote;
+    imbalance.is_finite().then_some(imbalance.clamp(-1.0, 1.0))
+}
+
+fn taker_buy_imbalance_window(candles: &[Candle], minutes: usize) -> Option<f64> {
+    if minutes == 0 || candles.len() < minutes {
+        return None;
+    }
+    let tail = &candles[candles.len() - minutes..];
+    let total_quote = tail.iter().map(|candle| candle.volume_quote).sum::<f64>();
+    let taker_buy_quote = tail
+        .iter()
+        .map(|candle| candle.taker_buy_quote)
+        .sum::<f64>();
+    if !total_quote.is_finite() || total_quote <= 0.0 || !taker_buy_quote.is_finite() {
+        return None;
+    }
+    let sell_quote = total_quote - taker_buy_quote;
+    let imbalance = (taker_buy_quote - sell_quote) / total_quote;
+    imbalance.is_finite().then_some(imbalance.clamp(-1.0, 1.0))
 }
 
 fn price_block(state: &SymbolState, candles: &[Candle], last_price: Option<f64>) -> PriceBlock {
@@ -122,7 +201,12 @@ fn liquidity_block(state: &SymbolState) -> LiquidityBlock {
         book_mode: state.quality.book_mode.clone(),
         spread_bp: trusted_full_book
             .and_then(|book| book.spread_bp())
-            .or_else(|| state.partial_book.as_ref().and_then(|book| book.spread_bp())),
+            .or_else(|| {
+                state
+                    .partial_book
+                    .as_ref()
+                    .and_then(|book| book.spread_bp())
+            }),
         i1: trusted_full_book
             .and_then(|book| book.notional_imbalance_top_n(1))
             .or_else(|| {
@@ -449,13 +533,28 @@ fn evaluate_lri(state: &SymbolState, config: &ScoreConfig) -> ScoreResult {
     let liq_5bp = history.latest_liq_5bp_usd;
     let neg_slip = history.latest_neg_slip_bp;
     let spread_stats = neg_spread.and_then(|current| {
-        robust_component(&history.neg_spread_bp, current, config.min_samples, config.z_clip)
+        robust_component(
+            &history.neg_spread_bp,
+            current,
+            config.min_samples,
+            config.z_clip,
+        )
     });
     let liq_stats = liq_5bp.and_then(|current| {
-        robust_component(&history.liq_5bp_usd, current, config.min_samples, config.z_clip)
+        robust_component(
+            &history.liq_5bp_usd,
+            current,
+            config.min_samples,
+            config.z_clip,
+        )
     });
     let slip_stats = neg_slip.and_then(|current| {
-        robust_component(&history.neg_slip_bp, current, config.min_samples, config.z_clip)
+        robust_component(
+            &history.neg_slip_bp,
+            current,
+            config.min_samples,
+            config.z_clip,
+        )
     });
     if missing.is_empty() && (spread_stats.is_none() || liq_stats.is_none() || slip_stats.is_none())
     {
@@ -509,7 +608,10 @@ fn lri_source_missing_reasons(state: &SymbolState, slip_notional_usd: f64) -> Ve
     if state.quality.book_seq_ok != Some(true) {
         missing.push("book_seq_not_ok".to_string());
     }
-    if trusted_full_book(state).and_then(|book| book.spread_bp()).is_none() {
+    if trusted_full_book(state)
+        .and_then(|book| book.spread_bp())
+        .is_none()
+    {
         missing.push("spread_bp_missing".to_string());
     }
     if trusted_full_book(state)
@@ -556,7 +658,12 @@ fn evaluate_tcs(
         robust_component(&history.adx14, current, config.min_samples, config.z_clip)
     });
     let slope_stats = ema50_slope.and_then(|current| {
-        robust_component(&history.ema50_slope, current, config.min_samples, config.z_clip)
+        robust_component(
+            &history.ema50_slope,
+            current,
+            config.min_samples,
+            config.z_clip,
+        )
     });
     let bb_stats = bb_width_pctile.and_then(|current| {
         robust_component(
@@ -580,8 +687,7 @@ fn evaluate_tcs(
         meta: ScoreMeta {
             available: value.is_some(),
             formula: Some(
-                "z(ADX14)*sign(close-EMA200)+0.5*z(ema50_slope)-0.5*z(BB_width_pctile)"
-                    .to_string(),
+                "z(ADX14)*sign(close-EMA200)+0.5*z(ema50_slope)-0.5*z(BB_width_pctile)".to_string(),
             ),
             z: value,
             components: serde_json::json!({
@@ -742,7 +848,8 @@ fn evaluate_rpi(
             config.z_clip,
         )
     });
-    if missing.is_empty() && (rsi_stats.is_none() || funding_stats.is_none() || book_stats.is_none())
+    if missing.is_empty()
+        && (rsi_stats.is_none() || funding_stats.is_none() || book_stats.is_none())
     {
         missing.push("component_window_insufficient".to_string());
     }
@@ -756,9 +863,7 @@ fn evaluate_rpi(
         value,
         meta: ScoreMeta {
             available: value.is_some(),
-            formula: Some(
-                "z(rsi_extreme)+z(funding_same_side)+z(book_against_move)".to_string(),
-            ),
+            formula: Some("z(rsi_extreme)+z(funding_same_side)+z(book_against_move)".to_string()),
             z: value,
             components: serde_json::json!({
                 "rsi_extreme": component_json(rsi_extreme, rsi_stats),
@@ -795,7 +900,9 @@ fn evaluate_vov(state: &SymbolState, chart: &ChartBlock, config: &ScoreConfig) -
     if missing.is_empty() && ratio_stats.is_none() {
         missing.push("atr_delta_ratio_window_insufficient".to_string());
     }
-    let value = ratio_stats.filter(|_| missing.is_empty()).map(|stats| stats.z);
+    let value = ratio_stats
+        .filter(|_| missing.is_empty())
+        .map(|stats| stats.z);
     ScoreResult {
         value,
         meta: ScoreMeta {
@@ -908,7 +1015,10 @@ fn ema_last_from_candles(candles: &[Candle], period: usize) -> Option<f64> {
     if candles.len() < period || period == 0 {
         return None;
     }
-    let closes = candles.iter().map(|candle| candle.close).collect::<Vec<_>>();
+    let closes = candles
+        .iter()
+        .map(|candle| candle.close)
+        .collect::<Vec<_>>();
     ema_last(&closes, period)
 }
 
@@ -916,7 +1026,10 @@ fn ema_slope_from_candles(candles: &[Candle], period: usize, lookback: usize) ->
     if lookback == 0 || candles.len() < period + lookback {
         return None;
     }
-    let closes = candles.iter().map(|candle| candle.close).collect::<Vec<_>>();
+    let closes = candles
+        .iter()
+        .map(|candle| candle.close)
+        .collect::<Vec<_>>();
     let now = ema_last(&closes, period)?;
     let past_end = closes.len().checked_sub(lookback)?;
     let past = ema_last(&closes[..past_end], period)?;

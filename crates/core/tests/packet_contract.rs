@@ -1,7 +1,8 @@
 use chrono::{TimeZone, Utc};
 use perp_radar_core::packet::{
-    CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
-    PriceBlock, ScoreMeta, ScoresBlock, StandardPacket, UniverseBlock,
+    CarryBlock, ChartBlock, DerivativesBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock,
+    OrderflowBlock, PacketProfile, PriceBlock, ScoreMeta, ScoresBlock, StandardPacket,
+    StructureBlock, UniverseBlock,
 };
 use perp_radar_core::quality::{QualityReason, QualityState};
 use perp_radar_core::types::UniverseTier;
@@ -43,6 +44,9 @@ fn standard_packet_serializes_null_metrics_and_reasons() {
         },
         carry: CarryBlock::default(),
         events: EventsBlock::default(),
+        structure: StructureBlock::default(),
+        derivatives: DerivativesBlock::default(),
+        orderflow: OrderflowBlock::default(),
         scores: ScoresBlock {
             tcs: Some(0.81),
             vov: Some(1.42),
@@ -135,6 +139,9 @@ fn packet_21_serializes_formal_scores_meta_and_legacy_scores() {
         liquidity: LiquidityBlock::default(),
         carry: CarryBlock::default(),
         events: EventsBlock::default(),
+        structure: StructureBlock::default(),
+        derivatives: DerivativesBlock::default(),
+        orderflow: OrderflowBlock::default(),
         scores: ScoresBlock {
             dpi10: Some(0.12),
             ..ScoresBlock::default()

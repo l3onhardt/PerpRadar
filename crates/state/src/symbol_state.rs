@@ -23,6 +23,13 @@ pub struct MarkPriceUpdate {
 }
 
 #[derive(Debug, Clone)]
+pub struct OpenInterestUpdate {
+    pub symbol: String,
+    pub open_interest: f64,
+    pub event_time_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct TickerUpdate {
     pub symbol: String,
     pub last_price: f64,
@@ -82,6 +89,7 @@ pub struct SymbolState {
     pub funding_rate: Option<f64>,
     pub funding_history: Vec<f64>,
     pub next_funding_time: Option<DateTime<Utc>>,
+    pub open_interest: Option<f64>,
     pub last_price: Option<f64>,
     pub quote_volume_24h: Option<f64>,
     pub price_change_percent_24h: Option<f64>,
@@ -103,6 +111,7 @@ impl SymbolState {
             funding_rate: None,
             funding_history: Vec::new(),
             next_funding_time: None,
+            open_interest: None,
             last_price: None,
             quote_volume_24h: None,
             price_change_percent_24h: None,
@@ -173,6 +182,22 @@ impl SymbolState {
         self.last_event_time_ms = Some(update.event_time_ms);
         self.record_carry_score_components();
         self.record_rpi_score_components();
+        self.quality.freshness_ms = 0;
+        self.quality.stale = false;
+        self.quality.clear_reason(QualityReason::StaleMarketData);
+        true
+    }
+
+    pub fn apply_open_interest(&mut self, update: OpenInterestUpdate) -> bool {
+        if update.symbol != self.symbol
+            || !update.open_interest.is_finite()
+            || update.open_interest < 0.0
+        {
+            return false;
+        }
+
+        self.open_interest = Some(update.open_interest);
+        self.last_event_time_ms = Some(update.event_time_ms);
         self.quality.freshness_ms = 0;
         self.quality.stale = false;
         self.quality.clear_reason(QualityReason::StaleMarketData);
@@ -323,8 +348,7 @@ impl SymbolState {
     }
 
     pub fn age_quality(&mut self, now_ms: i64, stale_after_ms: u64) {
-        self.quality =
-            self.quality_with_freshness(self.quality.clone(), now_ms, stale_after_ms);
+        self.quality = self.quality_with_freshness(self.quality.clone(), now_ms, stale_after_ms);
     }
 
     pub fn quality_with_freshness(
@@ -394,7 +418,10 @@ impl SymbolState {
 
     fn record_rpi_score_components(&mut self) {
         let candles = self.candles_1m.items();
-        let closes = candles.iter().map(|candle| candle.close).collect::<Vec<_>>();
+        let closes = candles
+            .iter()
+            .map(|candle| candle.close)
+            .collect::<Vec<_>>();
         let funding_z_7d = self
             .funding_rate
             .and_then(|rate| funding_z_score(&self.funding_history, rate));
@@ -435,8 +462,7 @@ fn tail_return(candles: &[Candle], minutes: usize) -> Option<f64> {
 }
 
 fn funding_z_score(history: &[f64], current: f64) -> Option<f64> {
-    if history.len() < 2 || !current.is_finite() || history.iter().any(|value| !value.is_finite())
-    {
+    if history.len() < 2 || !current.is_finite() || history.iter().any(|value| !value.is_finite()) {
         return None;
     }
     let mean = history.iter().sum::<f64>() / history.len() as f64;
@@ -484,7 +510,10 @@ fn ema_slope(candles: &[Candle], period: usize, lookback: usize) -> Option<f64> 
     if lookback == 0 || candles.len() < period + lookback {
         return None;
     }
-    let closes = candles.iter().map(|candle| candle.close).collect::<Vec<_>>();
+    let closes = candles
+        .iter()
+        .map(|candle| candle.close)
+        .collect::<Vec<_>>();
     let now = ema_last(&closes, period)?;
     let past_end = closes.len().checked_sub(lookback)?;
     let past = ema_last(&closes[..past_end], period)?;
@@ -511,7 +540,10 @@ fn bollinger_width(candles: &[Candle], period: usize) -> Option<f64> {
     if candles.len() < period || period == 0 {
         return None;
     }
-    let closes = candles.iter().map(|candle| candle.close).collect::<Vec<_>>();
+    let closes = candles
+        .iter()
+        .map(|candle| candle.close)
+        .collect::<Vec<_>>();
     let window = &closes[closes.len() - period..];
     let mean = window.iter().sum::<f64>() / period as f64;
     if mean == 0.0 {

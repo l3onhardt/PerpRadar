@@ -4,8 +4,9 @@ use chrono::{TimeZone, Utc};
 use perp_radar_api::cache::PacketCache;
 use perp_radar_api::routes::router;
 use perp_radar_core::packet::{
-    CarryBlock, ChartBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock, PacketProfile,
-    PriceBlock, ScoresBlock, StandardPacket, UniverseBlock,
+    CarryBlock, ChartBlock, DerivativesBlock, EventsBlock, LegacyScoresBlock, LiquidityBlock,
+    OrderflowBlock, PacketProfile, PriceBlock, ScoresBlock, StandardPacket, StructureBlock,
+    UniverseBlock,
 };
 use perp_radar_core::quality::QualityState;
 use perp_radar_core::types::UniverseTier;
@@ -70,6 +71,9 @@ fn packet_with(symbol: &str, rank: usize) -> StandardPacket {
             liq_side: Some("long".to_string()),
             volume_spike_z: Some(1.8),
         },
+        structure: StructureBlock::default(),
+        derivatives: DerivativesBlock::default(),
+        orderflow: OrderflowBlock::default(),
         scores: ScoresBlock {
             tcs: Some(0.81),
             lri: Some(0.22),
